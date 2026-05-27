@@ -139,14 +139,16 @@ build_binary() {
 EOF
   cp "$out_dir/package.json" "$out_dir/bin/package.json"
   
-  # Copy assets
+  # Copy assets to bin directory (where binary expects them)
+  mkdir -p "$out_dir/bin/theme"
+  cp src/modes/interactive/theme/*.json "$out_dir/bin/theme/" 2>/dev/null || true
+  mkdir -p "$out_dir/bin/assets"
+  cp src/modes/interactive/assets/*.png "$out_dir/bin/assets/" 2>/dev/null || true
+  
+  # Copy docs and examples to root
   cp -r dist/docs "$out_dir/" 2>/dev/null || true
   cp -r dist/examples "$out_dir/" 2>/dev/null || true
   cp dist/CHANGELOG.md "$out_dir/" 2>/dev/null || true
-  mkdir -p "$out_dir/theme"
-  cp src/modes/interactive/theme/*.json "$out_dir/theme/" 2>/dev/null || true
-  mkdir -p "$out_dir/assets"
-  cp src/modes/interactive/assets/*.png "$out_dir/assets/" 2>/dev/null || true
   
   echo -e "${GREEN}Binary built: $out_bin${RESET}"
 }
