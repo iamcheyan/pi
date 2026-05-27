@@ -153,8 +153,12 @@ fi
 if ! git diff --quiet || ! git diff --cached --quiet || [ -n "$(git ls-files --others --exclude-standard)" ]; then
   echo -e "${DIM}Stashing local worktree changes...${RESET}"
   git stash push --include-untracked -m "$STASH_NAME" >/dev/null
-  STASH_REF="$(git stash list --format='%gd %s' | grep "$STASH_NAME" | awk '{print $1}')"
-  STASHED=true
+  STASH_REF="$(git stash list --format='%gd %s' | awk -v name="$STASH_NAME" 'index($0, name) { print $1; exit }')"
+  if [ -n "$STASH_REF" ]; then
+    STASHED=true
+  else
+    echo -e "${YELLOW}No stash was created. Continuing with the current worktree state.${RESET}"
+  fi
 fi
 
 # ─── 3. Check for new commits ────────────────────────────────────────────────
