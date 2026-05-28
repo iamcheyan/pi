@@ -49,20 +49,6 @@ restore_root_agents() {
   echo -e "  ${GREEN}✓${RESET} AGENTS.md refreshed from fork/AGENTS.md"
 }
 
-restore_git_hooks() {
-  if [ ! -f "fork/pre-commit" ]; then
-    echo -e "${YELLOW}fork/pre-commit not found; keeping current hooks.${RESET}"
-    return
-  fi
-
-  echo ""
-  echo -e "${DIM}Restoring git pre-commit hook from fork/pre-commit...${RESET}"
-  mkdir -p .husky
-  cp fork/pre-commit .husky/pre-commit
-  chmod +x .husky/pre-commit
-  git add .husky/pre-commit fork/pre-commit
-  echo -e "  ${GREEN}✓${RESET} Git pre-commit hook refreshed from fork/pre-commit"
-}
 
 stage_fork_readme() {
   echo ""
@@ -225,7 +211,6 @@ if [ "$UPSTREAM_COUNT" -eq 0 ]; then
   stage_fork_readme
   remove_upstream_files
   restore_root_agents
-  restore_git_hooks
 
   if git diff --quiet && git diff --cached --quiet && [ -z "$(git ls-files --others --exclude-standard)" ]; then
     echo -e "${DIM}No local changes to commit.${RESET}"
@@ -253,7 +238,6 @@ OUR_DIRS=(
 
 OUR_FILES=(
   "fork/AGENTS.md"
-  "fork/pre-commit"
   "fork/README.md"
 )
 
