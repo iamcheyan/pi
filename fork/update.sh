@@ -37,16 +37,16 @@ restore_stash() {
 }
 
 restore_root_agents() {
-  if [ ! -f "fork/AGENTS.root.md" ]; then
-    echo -e "${YELLOW}fork/AGENTS.root.md not found; keeping current root AGENTS.md.${RESET}"
+  if [ ! -f "fork/AGENTS.md" ]; then
+    echo -e "${YELLOW}fork/AGENTS.md not found; keeping current root AGENTS.md.${RESET}"
     return
   fi
 
   echo ""
-  echo -e "${DIM}Restoring root AGENTS.md from fork/AGENTS.root.md...${RESET}"
-  cp fork/AGENTS.root.md AGENTS.md
-  git add AGENTS.md fork/AGENTS.root.md
-  echo -e "  ${GREEN}✓${RESET} AGENTS.md refreshed from fork/AGENTS.root.md"
+  echo -e "${DIM}Restoring root AGENTS.md from fork/AGENTS.md...${RESET}"
+  cp fork/AGENTS.md AGENTS.md
+  git add AGENTS.md fork/AGENTS.md
+  echo -e "  ${GREEN}✓${RESET} AGENTS.md refreshed from fork/AGENTS.md"
 }
 
 restore_git_hooks() {
@@ -218,7 +218,23 @@ UPSTREAM_COUNT="$(git rev-list --count HEAD..$UPSTREAM_HEAD 2>/dev/null || echo 
 
 if [ "$UPSTREAM_COUNT" -eq 0 ]; then
   echo -e "${GREEN}Already up to date with upstream.${RESET}"
+  echo ""
+
+  # Still commit any local fork/ changes
   restore_stash
+  stage_fork_readme
+  remove_upstream_files
+  restore_root_agents
+  restore_git_hooks
+
+  if git diff --quiet && git diff --cached --quiet && [ -z "$(git ls-files --others --exclude-standard)" ]; then
+    echo -e "${DIM}No local changes to commit.${RESET}"
+    exit 0
+  fi
+
+  git add -A
+  git commit -m "Update fork files"
+  echo -e "${GREEN}✓ Committed local changes.${RESET}"
   exit 0
 fi
 
@@ -236,7 +252,6 @@ OUR_DIRS=(
 )
 
 OUR_FILES=(
-  "fork/AGENTS.root.md"
   "fork/AGENTS.md"
   "fork/pre-commit"
   "fork/README.md"
