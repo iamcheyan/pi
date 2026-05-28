@@ -92,6 +92,51 @@ remove_upstream_github_dir() {
   git rm -r --ignore-unmatch .github >/dev/null 2>&1 || rm -rf .github
 }
 
+remove_upstream_files() {
+  echo ""
+  echo -e "${DIM}Removing upstream files we don't need...${RESET}"
+
+  # Files and dirs to remove (upstream-only, not needed for build)
+  REMOVE_TARGETS=(
+    ".claude"
+    ".husky"
+    ".pi"
+    "docs"
+    "AGENTS.md"
+    "CONTRIBUTING.md"
+    "README.md"
+    "pi-test.bat"
+    "pi-test.ps1"
+    "pi-test.sh"
+    "context.md"
+    "progress.md"
+  )
+
+  REMOVED=0
+  for target in "${REMOVE_TARGETS[@]}"; do
+    if [ -e "$target" ] || [ -L "$target" ]; then
+      git rm -rf --ignore-unmatch "$target" >/dev/null 2>&1 || rm -rf "$target"
+      echo -e "  ${GREEN}✓${RESET} removed $target"
+      REMOVED=$((REMOVED + 1))
+    fi
+  done
+
+  # Also clean up untracked dirs that upstream may recreate
+  for target in "${REMOVE_TARGETS[@]}"; do
+    if [ -e "$target" ] || [ -L "$target" ]; then
+      rm -rf "$target"
+      echo -e "  ${GREEN}✓${RESET} removed $target (untracked)"
+      REMOVED=$((REMOVED + 1))
+    fi
+  done
+
+  if [ "$REMOVED" -eq 0 ]; then
+    echo -e "  ${DIM}nothing to remove${RESET}"
+  else
+    echo -e "  ${DIM}removed $REMOVED file(s)/dir(s)${RESET}"
+  fi
+}
+
 update_models_snapshot() {
   echo ""
   echo -e "${DIM}Refreshing models snapshot...${RESET}"
@@ -191,11 +236,10 @@ OUR_DIRS=(
 )
 
 OUR_FILES=(
-  "AGENTS.md"
   "fork/AGENTS.root.md"
   "fork/AGENTS.md"
   "fork/pre-commit"
-  ".husky/pre-commit"
+  "fork/README.md"
 )
 
 echo -e "${BOLD}Our custom files:${RESET}"
@@ -265,6 +309,7 @@ fi
 
 stage_fork_readme
 remove_upstream_github_dir
+remove_upstream_files
 restore_root_agents
 restore_git_hooks
 update_models_snapshot
