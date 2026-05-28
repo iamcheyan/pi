@@ -208,8 +208,8 @@ if [ "$UPSTREAM_COUNT" -eq 0 ]; then
 
   # Still commit any local fork/ changes
   restore_stash
-  stage_fork_readme
   remove_upstream_files
+  stage_fork_readme
   restore_root_agents
 
   if git diff --quiet && git diff --cached --quiet && [ -z "$(git ls-files --others --exclude-standard)" ]; then
