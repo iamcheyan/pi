@@ -1,6 +1,7 @@
 # Pi (Fork)
 
 This is a fork of [pi](https://github.com/earendil-works/pi) — an AI coding assistant with read, bash, edit, write tools.
+Repository: https://github.com/iamcheyan/pi
 
 The fork keeps the upstream source intact and layers our own extensions and build tooling on top.
 
@@ -17,7 +18,7 @@ These are installed as npm extensions via `fork/init.sh`.
 
 ```bash
 # 1. Clone the repo
-git clone <repo-url> && cd pi
+git clone https://github.com/iamcheyan/pi.git && cd pi
 
 # 2. Run init (installs extensions + creates PATH wrapper)
 bash fork/init.sh
