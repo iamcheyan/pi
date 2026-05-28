@@ -102,8 +102,9 @@ build_deps() {
 # ─── Build binary ────────────────────────────────────────────────────────────
 build_binary() {
   local version
-  version="$(cd "$ROOT_DIR" && git describe --tags --always 2>/dev/null || echo "0.0.0-dev")"
-  version="${version#v}"
+  # Prefer the clean version from package.json to avoid prerelease suffixes
+  # (git describe produces e.g. 0.76.0-24-ge658bb04 which looks older than 0.76.0)
+  version="$(cd "$ROOT_DIR" && node -e "console.log(JSON.parse(require('fs').readFileSync('packages/coding-agent/package.json','utf-8')).version || '0.0.0-dev')" 2>/dev/null || echo '0.0.0-dev')"
   
   local channel
   channel="$(cd "$ROOT_DIR" && git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "local")"
