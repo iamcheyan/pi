@@ -100,10 +100,23 @@ install_pi_binary() {
     echo ""
     echo -e "${BOLD}Installing pi binary...${RESET}"
 
+    # Detect incomplete installation (binary exists but missing required files)
     if [ -x "$HOME/.local/bin/pi" ]; then
-        echo -e "  ${DIM}pi already installed at ~/.local/bin/pi, skipping${RESET}"
-        echo -e "  ${DIM}Run with --force to reinstall${RESET}"
-        return
+        if [ -f "$HOME/.local/bin/package.json" ] && [ -f "$HOME/.local/bin/theme/dark.json" ]; then
+            echo -e "  ${DIM}pi already installed at ~/.local/bin/pi, skipping${RESET}"
+            return
+        fi
+        # Incomplete install — offer to clean up
+        echo -e "  ${YELLOW}⚠ pi binary found but installation is incomplete (missing theme/assets)${RESET}"
+        read -rp "  Clean up and reinstall? [Y/n] " choice
+        case "$choice" in
+            [nN]|[nN][oO]) echo -e "  ${DIM}skipping cleanup${RESET}" ;;
+            *) rm -rf "$HOME/.local/bin/pi" "$HOME/.local/bin/package.json" \
+                   "$HOME/.local/bin/theme" "$HOME/.local/bin/assets" \
+                   "$HOME/.local/bin/photon_rs_bg.wasm" "$HOME/.local/bin/native" \
+                   "$HOME/.local/bin/export-html" 2>/dev/null
+               echo -e "  ${GREEN}✓${RESET} cleaned up incomplete installation" ;;
+        esac
     fi
 
     detect_platform
