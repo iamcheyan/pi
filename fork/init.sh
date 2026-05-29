@@ -108,7 +108,7 @@ install_pi_binary() {
         fi
         # Incomplete install — offer to clean up
         echo -e "  ${YELLOW}⚠ pi binary found but installation is incomplete (missing theme/assets)${RESET}"
-        read -rp "  Clean up and reinstall? [Y/n] " choice
+        read -rp "  Clean up and reinstall? [Y/n] " choice < /dev/tty
         case "$choice" in
             [nN]|[nN][oO]) echo -e "  ${DIM}skipping cleanup${RESET}" ;;
             *) rm -rf "$HOME/.local/bin/pi" "$HOME/.local/bin/package.json" \
@@ -394,7 +394,7 @@ else
         else
             # Failed — likely needs sudo
             echo -e "  ${YELLOW}⚠ need sudo for global install${RESET}"
-            read -rp "  Install with sudo? [Y/n] " choice
+            read -rp "  Install with sudo? [Y/n] " choice < /dev/tty
             case "$choice" in
                 [nN]|[nN][oO])
                     echo -e "  ${DIM}skipped — run manually: sudo npm install -g context-mode${RESET}"
