@@ -9,26 +9,40 @@ The fork keeps the upstream source intact and layers our own extensions and buil
 
 - **pi-subagents** — delegate tasks to specialized agents (scout, planner, reviewer, worker, oracle, ...) with isolated context windows
 - **pi-mcp-adapter** — MCP server integration
+- **context-mode** — 98% context reduction via sandbox execution and FTS5 knowledge base
 - **pi-minimal** — minimal TUI overlay
 - **pi-opencode-config-reader** — opencode config reader
 
-These are installed as npm extensions via `fork/init.sh`.
+These are installed via `fork/init.sh`.
 
 ## Quick Start
+
+### One-liner install (no repo needed)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/iamcheyan/pi/main/fork/init.sh | bash
+```
+
+This downloads pi + all extensions on a fresh machine.
+
+### From repo
 
 ```bash
 # 1. Clone the repo
 git clone https://github.com/iamcheyan/pi.git && cd pi
 
-# 2. Run init (installs extensions + creates PATH wrapper)
+# 2. Run init (uses local binary, symlinks extensions)
 bash fork/init.sh
 
-# 3. Build the binary
+# 3. Build the binary (if not built yet)
 bash fork/build.sh
 
 # 4. Use pi
 pi --help
 ```
+
+> Extensions auto-load from `~/.pi/agent/extensions/` — no `--extension` flags needed.
+> Set `export PI_REPO="$HOME/Development/pi"` in your shell rc for faster binary detection.
 
 ## Fork Commands
 
@@ -43,12 +57,22 @@ All scripts live in `fork/`.
 
 ### init.sh
 
-Sets up everything needed to run pi with our extensions:
+Works in two modes:
 
-- Creates `~/.pi/agent/{extensions,agents,prompts}` directories
-- Creates `~/.local/bin/pi` wrapper (auto-detects repo location)
-- Installs `npm:pi-subagents` and `npm:pi-mcp-adapter`
-- Removes conflicting example symlinks
+**Local mode** (inside pi repo):
+- Uses the local fork build as pi binary
+- Symlinks extensions from `fork/pi-minimal/` and `fork/pi-opencode-config-reader/`
+- Creates `~/.local/bin/pi` wrapper with auto-detection
+
+**Remote mode** (standalone, e.g. `curl ... | bash`):
+- Downloads pi binary from upstream GitHub releases
+- Installs to `~/.local/bin/pi`
+- Clones extensions from GitHub
+
+Both modes then:
+- Install `npm:pi-subagents`, `npm:pi-mcp-adapter`, `npm:context-mode`
+- Configure `~/.pi/agent/mcp.json` for context-mode
+- Remove conflicting example symlinks
 
 Run once after clone, or whenever extensions change.
 
