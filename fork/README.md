@@ -5,15 +5,26 @@ Repository: https://github.com/iamcheyan/pi
 
 The fork keeps the upstream source intact and layers our own extensions and build tooling on top.
 
-## What's Different
+## What's Included
 
-- **pi-subagents** — delegate tasks to specialized agents (scout, planner, reviewer, worker, oracle, ...) with isolated context windows
-- **pi-mcp-adapter** — MCP server integration
-- **context-mode** — 98% context reduction via sandbox execution and FTS5 knowledge base
-- **pi-minimal** — minimal TUI overlay
-- **pi-opencode-config-reader** — opencode config reader
+### Core Extensions
 
-These are installed via `fork/init.sh`.
+| Extension | Description | Source |
+|-----------|-------------|--------|
+| [pi-minimal](https://github.com/iamcheyan/pi-minimal) | Minimalist REPL-style TUI — clean interface with `»` prompt, compact spacing, startup header | [iamcheyan/pi-minimal](https://github.com/iamcheyan/pi-minimal) |
+| [pi-opencode-config-reader](https://github.com/iamcheyan/pi-opencode-config-reader) | Auto-import providers/models from `opencode.json` config files | [iamcheyan/pi-opencode-config-reader](https://github.com/iamcheyan/pi-opencode-config-reader) |
+
+### Installed Packages
+
+| Package | Description | Source |
+|---------|-------------|--------|
+| [pi-subagents](https://github.com/nicobailon/pi-subagents) | Delegate tasks to specialized agents (scout, planner, reviewer, worker, oracle, ...) with isolated context windows | [nicobailon/pi-subagents](https://github.com/nicobailon/pi-subagents) |
+| [pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter) | Token-efficient MCP adapter — one proxy tool (~200 tokens) instead of hundreds of MCP tools | [nicobailon/pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter) |
+| [context-mode](https://pi.dev/packages/context-mode) | 98% context reduction via sandbox execution, FTS5 knowledge base, and session state tracking | [npm:context-mode](https://www.npmjs.com/package/context-mode) |
+
+### Upstream
+
+Base: [earendil-works/pi](https://github.com/earendil-works/pi)
 
 ## Quick Start
 
@@ -92,7 +103,7 @@ Syncs with upstream pi repository:
 
 1. Fetches upstream main branch
 2. Stashes local changes
-3. Merges upstream (auto-resolves .github/ conflicts)
+3. Merges upstream (auto-resolves .github/, AGENTS.md, README.md conflicts)
 4. Removes upstream files we don't need
 5. Copies `fork/README.md` → root `README.md`
 6. Restores our custom AGENTS.md and git hooks
