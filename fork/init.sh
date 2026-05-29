@@ -140,21 +140,18 @@ print(json.load(sys.stdin).get('tag_name', ''))
     echo -e "  ${DIM}Extracting...${RESET}"
     tar -xzf "$tmpdir/$archive_name" -C "$tmpdir"
 
-    # Find the pi binary in extracted contents
-    local extracted_bin
-    extracted_bin=$(find "$tmpdir" -name "pi" -type f -executable 2>/dev/null | head -1)
-    if [ -z "$extracted_bin" ]; then
-        # Try non-executable (tar may not preserve permissions)
-        extracted_bin=$(find "$tmpdir" -name "pi" -type f 2>/dev/null | head -1)
-    fi
-
-    if [ -z "$extracted_bin" ]; then
-        echo -e "  ${RED}Could not find pi binary in archive${RESET}"
+    # The tarball extracts to pi/ directory — copy contents to ~/.local/bin/
+    local pi_dir="$tmpdir/pi"
+    if [ ! -d "$pi_dir" ]; then
+        echo -e "  ${RED}Unexpected archive structure — no pi/ directory${RESET}"
         return 1
     fi
 
     mkdir -p "$HOME/.local/bin"
-    cp "$extracted_bin" "$HOME/.local/bin/pi"
+    # Copy all files from pi/ to ~/.local/bin/ (binary, package.json, wasm, etc.)
+    cp "$pi_dir"/pi "$HOME/.local/bin/pi"
+    cp "$pi_dir"/package.json "$HOME/.local/bin/package.json" 2>/dev/null || true
+    cp "$pi_dir"/photon_rs_bg.wasm "$HOME/.local/bin/photon_rs_bg.wasm" 2>/dev/null || true
     chmod +x "$HOME/.local/bin/pi"
 
     echo -e "  ${GREEN}✓${RESET} pi ${latest_tag} installed → ~/.local/bin/pi"
