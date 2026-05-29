@@ -9,10 +9,11 @@ The fork keeps the upstream source intact and layers our own extensions and buil
 
 - **pi-subagents** — delegate tasks to specialized agents (scout, planner, reviewer, worker, oracle, ...) with isolated context windows
 - **pi-mcp-adapter** — MCP server integration
+- **context-mode** — 98% context reduction via sandbox execution and FTS5 knowledge base
 - **pi-minimal** — minimal TUI overlay
 - **pi-opencode-config-reader** — opencode config reader
 
-These are installed as npm extensions via `fork/init.sh`.
+These are installed via `fork/init.sh`.
 
 ## Quick Start
 
@@ -20,7 +21,7 @@ These are installed as npm extensions via `fork/init.sh`.
 # 1. Clone the repo
 git clone https://github.com/iamcheyan/pi.git && cd pi
 
-# 2. Run init (installs extensions + creates PATH wrapper)
+# 2. Run init (downloads extensions + creates PATH wrapper)
 bash fork/init.sh
 
 # 3. Build the binary
@@ -29,6 +30,9 @@ bash fork/build.sh
 # 4. Use pi
 pi --help
 ```
+
+> Extensions are downloaded from their repos and placed in `~/.pi/agent/extensions/` — they auto-load on startup.
+> Set `export PI_REPO="$HOME/Development/pi"` in your shell rc for faster binary detection.
 
 ## Fork Commands
 
@@ -45,9 +49,13 @@ All scripts live in `fork/`.
 
 Sets up everything needed to run pi with our extensions:
 
+- Downloads pi-minimal and pi-opencode-config-reader from GitHub
+- Copies extensions to `~/.pi/agent/extensions/` (auto-load, no `--extension` flags)
+- Copies theme to `~/.pi/agent/themes/`
 - Creates `~/.pi/agent/{extensions,agents,prompts}` directories
-- Creates `~/.local/bin/pi` wrapper (auto-detects repo location)
-- Installs `npm:pi-subagents` and `npm:pi-mcp-adapter`
+- Creates `~/.local/bin/pi` wrapper (uses `$PI_REPO` env var or auto-detects)
+- Installs `npm:pi-subagents`, `npm:pi-mcp-adapter`, `npm:context-mode`
+- Configures `~/.pi/agent/mcp.json` for context-mode
 - Removes conflicting example symlinks
 
 Run once after clone, or whenever extensions change.
