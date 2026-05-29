@@ -77,9 +77,9 @@ resolve_pi_bin() {
         fi
     fi
 
-    # 2. Check ~/.local/bin/pi (installed by this script)
-    if [ -x "$HOME/.local/bin/pi" ]; then
-        PI_BIN="$HOME/.local/bin/pi"
+    # 2. Check ~/.pi/bin/pi (installed by this script)
+    if [ -x "$HOME/.pi/bin/pi" ]; then
+        PI_BIN="$HOME/.pi/bin/pi"
         return
     fi
 
@@ -101,9 +101,9 @@ install_pi_binary() {
     echo -e "${BOLD}Installing pi binary...${RESET}"
 
     # Detect incomplete installation (binary exists but missing required files)
-    if [ -x "$HOME/.local/bin/pi" ]; then
-        if [ -f "$HOME/.local/bin/package.json" ] && [ -f "$HOME/.local/bin/theme/dark.json" ]; then
-            echo -e "  ${DIM}pi already installed at ~/.local/bin/pi, skipping${RESET}"
+    if [ -x "$HOME/.pi/bin/pi" ]; then
+        if [ -f "$HOME/.pi/bin/package.json" ] && [ -f "$HOME/.pi/bin/theme/dark.json" ]; then
+            echo -e "  ${DIM}pi already installed at ~/.pi/bin/pi, skipping${RESET}"
             return
         fi
         # Incomplete install — offer to clean up
@@ -111,10 +111,10 @@ install_pi_binary() {
         read -rp "  Clean up and reinstall? [Y/n] " choice < /dev/tty
         case "$choice" in
             [nN]|[nN][oO]) echo -e "  ${DIM}skipping cleanup${RESET}" ;;
-            *) rm -rf "$HOME/.local/bin/pi" "$HOME/.local/bin/package.json" \
-                   "$HOME/.local/bin/theme" "$HOME/.local/bin/assets" \
-                   "$HOME/.local/bin/photon_rs_bg.wasm" "$HOME/.local/bin/native" \
-                   "$HOME/.local/bin/export-html" 2>/dev/null
+            *) rm -rf "$HOME/.pi/bin/pi" "$HOME/.pi/bin/package.json" \
+                   "$HOME/.pi/bin/theme" "$HOME/.pi/bin/assets" \
+                   "$HOME/.pi/bin/photon_rs_bg.wasm" "$HOME/.pi/bin/native" \
+                   "$HOME/.pi/bin/export-html" 2>/dev/null
                echo -e "  ${GREEN}✓${RESET} cleaned up incomplete installation" ;;
         esac
     fi
@@ -153,19 +153,19 @@ print(json.load(sys.stdin).get('tag_name', ''))
     echo -e "  ${DIM}Extracting...${RESET}"
     tar -xzf "$tmpdir/$archive_name" -C "$tmpdir"
 
-    # The tarball extracts to pi/ directory — copy contents to ~/.local/bin/
+    # The tarball extracts to pi/ directory — copy contents to ~/.pi/bin/
     local pi_dir="$tmpdir/pi"
     if [ ! -d "$pi_dir" ]; then
         echo -e "  ${RED}Unexpected archive structure — no pi/ directory${RESET}"
         return 1
     fi
 
-    mkdir -p "$HOME/.local/bin"
+    mkdir -p "$HOME/.pi/bin"
     # Copy everything — binary needs theme/, assets/, package.json, wasm, etc.
-    cp -a "$pi_dir"/. "$HOME/.local/bin/"
-    chmod +x "$HOME/.local/bin/pi"
+    cp -a "$pi_dir"/. "$HOME/.pi/bin/"
+    chmod +x "$HOME/.pi/bin/pi"
 
-    echo -e "  ${GREEN}✓${RESET} pi ${latest_tag} installed → ~/.local/bin/pi"
+    echo -e "  ${GREEN}✓${RESET} pi ${latest_tag} installed → ~/.pi/bin/pi"
 
     # Cleanup
     rm -rf "$tmpdir"
@@ -257,7 +257,7 @@ fi
 echo ""
 echo -e "${BOLD}Setting up pi in PATH...${RESET}"
 
-WRAPPER_DIR="$HOME/.local/bin"
+WRAPPER_DIR="$HOME/.pi/bin"
 
 if [ "$IS_LOCAL" = true ]; then
     # Local mode: wrapper auto-detects repo binary
@@ -307,8 +307,8 @@ WRAPPER_EOF
         echo -e "  ${GREEN}✓${RESET} created $WRAPPER"
     fi
 else
-    # Remote mode: binary is already at ~/.local/bin/pi
-    echo -e "  ${GREEN}✓${RESET} pi binary at ~/.local/bin/pi"
+    # Remote mode: binary is already at ~/.pi/bin/pi
+    echo -e "  ${GREEN}✓${RESET} pi binary at ~/.pi/bin/pi"
 fi
 
 # Check PATH
@@ -316,7 +316,7 @@ if echo "$PATH" | tr ':' '\n' | grep -q "$WRAPPER_DIR"; then
     echo -e "  ${GREEN}✓${RESET} $WRAPPER_DIR is in PATH"
 else
     echo -e "  ${YELLOW}⚠ $WRAPPER_DIR is NOT in PATH${RESET}"
-    echo -e "  ${DIM}Add to ~/.zshrc: export PATH=\"\$HOME/.local/bin:\$PATH\"${RESET}"
+    echo -e "  ${DIM}Add to ~/.zshrc: export PATH=\"\$HOME/.pi/bin:\$PATH\"${RESET}"
 fi
 
 # Hint about PI_REPO (local mode only)
@@ -468,7 +468,7 @@ if [ "$IS_LOCAL" = true ]; then
     echo -e "  Mode:        ${CYAN}local (inside pi repo)${RESET}"
 else
     echo -e "  Mode:        ${CYAN}remote (standalone install)${RESET}"
-    echo -e "  Pi binary:   ${CYAN}~/.local/bin/pi${RESET}"
+    echo -e "  Pi binary:   ${CYAN}~/.pi/bin/pi${RESET}"
 fi
 echo -e "  Extensions:  ${CYAN}~/.pi/agent/extensions/${RESET}"
 echo -e "  Packages:    ${CYAN}pi-subagents, pi-mcp-adapter, context-mode${RESET}"
