@@ -148,10 +148,8 @@ print(json.load(sys.stdin).get('tag_name', ''))
     fi
 
     mkdir -p "$HOME/.local/bin"
-    # Copy all files from pi/ to ~/.local/bin/ (binary, package.json, wasm, etc.)
-    cp "$pi_dir"/pi "$HOME/.local/bin/pi"
-    cp "$pi_dir"/package.json "$HOME/.local/bin/package.json" 2>/dev/null || true
-    cp "$pi_dir"/photon_rs_bg.wasm "$HOME/.local/bin/photon_rs_bg.wasm" 2>/dev/null || true
+    # Copy everything — binary needs theme/, assets/, package.json, wasm, etc.
+    cp -a "$pi_dir"/. "$HOME/.local/bin/"
     chmod +x "$HOME/.local/bin/pi"
 
     echo -e "  ${GREEN}✓${RESET} pi ${latest_tag} installed → ~/.local/bin/pi"
