@@ -290,16 +290,10 @@ if [ -n "$UNMERGED" ]; then
   # Keep our fork AGENTS.md and README.md
   FORK_CONFLICTS=$(echo "$UNMERGED" | grep -E "^(AGENTS\.md|README\.md)$" || true)
   if [ -n "$FORK_CONFLICTS" ]; then
-    echo -e "${YELLOW}Auto-resolving AGENTS.md/README.md conflicts (keeping fork versions)...${RESET}"
+    echo -e "${YELLOW}Auto-resolving AGENTS.md/README.md (keeping fork versions)...${RESET}"
     echo "$FORK_CONFLICTS" | while IFS= read -r f; do
-      if [ -f "fork/$f" ]; then
-        cp "fork/$f" "$f"
-        git add "$f"
-        echo -e "  ${GREEN}✓${RESET} restored $f from fork/"
-      else
-        git checkout --ours "$f" 2>/dev/null && git add "$f"
-        echo -e "  ${GREEN}✓${RESET} kept our $f"
-      fi
+      git checkout --ours "$f" 2>/dev/null && git add "$f"
+      echo -e "  ${GREEN}✓${RESET} kept fork $f"
     done
   fi
 fi
