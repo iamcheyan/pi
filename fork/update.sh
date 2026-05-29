@@ -49,6 +49,11 @@ restore_root_agents() {
   echo -e "  ${GREEN}✓${RESET} AGENTS.md refreshed from fork/AGENTS.md"
 }
 
+restore_git_hooks() {
+  # No custom hooks to restore currently
+  :
+}
+
 
 stage_fork_readme() {
   echo ""
@@ -271,6 +276,7 @@ if ! git merge "$UPSTREAM_BRANCH" --no-edit --no-commit 2>/dev/null; then
 fi
 
 # Auto-resolve: keep our deletion of .github/ files (we don't need upstream CI)
+# Also keep our fork versions of AGENTS.md and README.md
 UNMERGED=$(git ls-files --unmerged | awk -F'\t' '{print $2}' | sort -u 2>/dev/null || true)
 if [ -n "$UNMERGED" ]; then
   GITHUB_CONFLICTS=$(echo "$UNMERGED" | grep "^\.github/" || true)
@@ -278,6 +284,22 @@ if [ -n "$UNMERGED" ]; then
     echo -e "${YELLOW}Auto-resolving .github/ conflicts (keeping our deletion)...${RESET}"
     echo "$GITHUB_CONFLICTS" | while IFS= read -r f; do
       git rm -f "$f" 2>/dev/null || true
+    done
+  fi
+
+  # Keep our fork AGENTS.md and README.md
+  FORK_CONFLICTS=$(echo "$UNMERGED" | grep -E "^(AGENTS\.md|README\.md)$" || true)
+  if [ -n "$FORK_CONFLICTS" ]; then
+    echo -e "${YELLOW}Auto-resolving AGENTS.md/README.md conflicts (keeping fork versions)...${RESET}"
+    echo "$FORK_CONFLICTS" | while IFS= read -r f; do
+      if [ -f "fork/$f" ]; then
+        cp "fork/$f" "$f"
+        git add "$f"
+        echo -e "  ${GREEN}✓${RESET} restored $f from fork/"
+      else
+        git checkout --ours "$f" 2>/dev/null && git add "$f"
+        echo -e "  ${GREEN}✓${RESET} kept our $f"
+      fi
     done
   fi
 fi
