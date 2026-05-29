@@ -157,9 +157,12 @@ EOF
 # ─── Smoke test ──────────────────────────────────────────────────────────────
 smoke_test() {
   local entrypoint="$1"
-  
-  if "$entrypoint" --help &>/dev/null; then
+
+  if "$entrypoint" --version &>/dev/null; then
     echo -e "${GREEN}Smoke test passed${RESET}"
+    echo ""
+    echo -e "${DIM}Starting pi...${RESET}"
+    exec "$entrypoint"
   else
     echo -e "${YELLOW}Warning: smoke test failed${RESET}"
   fi
