@@ -388,9 +388,26 @@ if command -v context-mode &>/dev/null; then
     echo -e "  ${DIM}context-mode binary already installed, skipping${RESET}"
 else
     if command -v npm &>/dev/null; then
-        npm install -g context-mode 2>/dev/null && \
-            echo -e "  ${GREEN}✓${RESET} context-mode installed globally" || \
-            echo -e "  ${YELLOW}⚠ failed to install context-mode globally${RESET}"
+        # Try without sudo first
+        if npm install -g context-mode 2>/dev/null; then
+            echo -e "  ${GREEN}✓${RESET} context-mode installed globally"
+        else
+            # Failed — likely needs sudo
+            echo -e "  ${YELLOW}⚠ need sudo for global install${RESET}"
+            read -rp "  Install with sudo? [Y/n] " choice
+            case "$choice" in
+                [nN]|[nN][oO])
+                    echo -e "  ${DIM}skipped — run manually: sudo npm install -g context-mode${RESET}"
+                    ;;
+                *)
+                    if sudo npm install -g context-mode 2>/dev/null; then
+                        echo -e "  ${GREEN}✓${RESET} context-mode installed globally (sudo)"
+                    else
+                        echo -e "  ${RED}✗ failed to install context-mode${RESET}"
+                    fi
+                    ;;
+            esac
+        fi
     else
         echo -e "  ${YELLOW}⚠ npm not found, skipping global install${RESET}"
         echo -e "  ${DIM}Run manually: npm install -g context-mode${RESET}"
