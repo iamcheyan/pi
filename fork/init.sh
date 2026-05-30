@@ -22,6 +22,7 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # Extension repos
 PI_MINIMAL_REPO="https://github.com/iamcheyan/pi-minimal.git"
 PI_OPENCODE_CONFIG_READER_REPO="https://github.com/iamcheyan/pi-opencode-config-reader.git"
+PI_RALPH_REPO="https://github.com/iamcheyan/pi-ralph.git"
 
 # Upstream releases (for remote install)
 UPSTREAM_REPO="earendil-works/pi"
@@ -253,6 +254,53 @@ else
     rm -rf "$TMPDIR_DL"
 fi
 
+# --- pi-ralph (extension + skills) ---
+PI_RALPH_SRC="$SCRIPT_DIR/pi-ralph"
+SKILLS_DIR="$HOME/.pi/agent/skills"
+
+if [ "$IS_LOCAL" = true ] && [ -d "$PI_RALPH_SRC" ]; then
+    ln -sfn "$PI_RALPH_SRC/index.ts" "$EXTENSIONS_DIR/pi-ralph.ts"
+    echo -e "  ${GREEN}✓${RESET} pi-ralph → symlinked to $PI_RALPH_SRC"
+
+    for skill in prd ralph ralph-worker ralph-wizard; do
+        src="$PI_RALPH_SRC/skills/$skill/SKILL.md"
+        if [ -f "$src" ]; then
+            mkdir -p "$SKILLS_DIR/$skill"
+            ln -sfn "$src" "$SKILLS_DIR/$skill/SKILL.md"
+        fi
+    done
+    echo -e "  ${GREEN}✓${RESET} ralph skills → symlinked to $SKILLS_DIR/{prd,ralph,ralph-worker,ralph-wizard}"
+else
+    if [ -d "$PI_RALPH_SRC" ]; then
+        cp "$PI_RALPH_SRC/index.ts" "$EXTENSIONS_DIR/pi-ralph.ts"
+        for skill in prd ralph ralph-worker ralph-wizard; do
+            src="$PI_RALPH_SRC/skills/$skill/SKILL.md"
+            if [ -f "$src" ]; then
+                mkdir -p "$SKILLS_DIR/$skill"
+                cp "$src" "$SKILLS_DIR/$skill/SKILL.md"
+            fi
+        done
+        echo -e "  ${GREEN}✓${RESET} pi-ralph → copied"
+    else
+        echo -e "  ${DIM}cloning pi-ralph...${RESET}"
+        TMPDIR_DL=$(mktemp -d)
+        if git clone --depth 1 "$PI_RALPH_REPO" "$TMPDIR_DL/pi-ralph" 2>/dev/null; then
+            cp "$TMPDIR_DL/pi-ralph/index.ts" "$EXTENSIONS_DIR/pi-ralph.ts"
+            for skill in prd ralph ralph-worker ralph-wizard; do
+                src="$TMPDIR_DL/pi-ralph/skills/$skill/SKILL.md"
+                if [ -f "$src" ]; then
+                    mkdir -p "$SKILLS_DIR/$skill"
+                    cp "$src" "$SKILLS_DIR/$skill/SKILL.md"
+                fi
+            done
+            echo -e "  ${GREEN}✓${RESET} pi-ralph → copied"
+        else
+            echo -e "  ${YELLOW}⚠ failed to clone pi-ralph, skipping${RESET}"
+        fi
+        rm -rf "$TMPDIR_DL"
+    fi
+fi
+
 # --- 5. Create pi wrapper in PATH ---
 echo ""
 echo -e "${BOLD}Setting up pi in PATH...${RESET}"
@@ -473,6 +521,7 @@ fi
 echo -e "  Extensions:  ${CYAN}~/.pi/agent/extensions/${RESET}"
 echo -e "  Packages:    ${CYAN}pi-subagents, pi-mcp-adapter, context-mode${RESET}"
 echo -e "  Subagents:   ${CYAN}/run, /chain, /parallel, /subagents-doctor${RESET}"
+echo -e "  Ralph:       ${CYAN}/ralph${RESET}"
 echo -e "  MCP:         ${CYAN}~/.pi/agent/mcp.json${RESET}"
 echo -e "  Settings:    ${CYAN}~/.pi/agent/settings.json${RESET}"
 echo ""
