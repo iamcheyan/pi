@@ -18,7 +18,7 @@ You will receive a task containing:
 
 ## Your Job
 
-1. Read the project codebase to understand context.
+1. Understand the project context from the feature description and clarifications. Do NOT read the project codebase — focus on the requirements only.
 2. Decide if you have enough information to write a solid PRD.
 3. If YES → generate the PRD and return the draft JSON.
 4. If NO → return a questions JSON with the minimum essential questions needed.

@@ -21,9 +21,9 @@ Feature description: <user request>
 ## Your Job
 
 1. Read the feature description.
-2. Inspect the current project codebase to understand context.
-3. Produce a short, concrete understanding of what the user appears to want.
-4. Decide how many clarifying questions are needed based on task complexity.
+2. Produce a short, concrete understanding of what the user appears to want.
+3. Decide how many clarifying questions are needed based on task complexity.
+4. Do NOT read the project codebase — the PRD converter handles codebase analysis later. Focus only on understanding the user's intent from the description.
 
 ## Question Count Rules
 
