@@ -174,34 +174,6 @@ class RalphBusyEditor extends CustomEditor {
     const formatLine = (color: "accent" | "error" | "muted" | "success" | "text" | "warning", text: string): string =>
       theme ? theme.fg(color, text) : text
 
-    // Truncate by visible width (CJK chars = 2 cols, ANSI codes = 0 cols)
-    const truncateToWidth = (str: string, maxWidth: number): string => {
-      let w = 0
-      let i = 0
-      while (i < str.length && w < maxWidth) {
-        // Skip ANSI escape sequences (0 width)
-        if (str[i] === "\x1b") {
-          const end = str.indexOf("m", i)
-          if (end !== -1) { i = end + 1; continue }
-        }
-        const cp = str.codePointAt(i)!
-        // CJK fullwidth: 2 columns
-        const charW = (cp >= 0x1100 && cp <= 0x115f) || // Hangul Jamo
-          (cp >= 0x2e80 && cp <= 0xa4cf && cp !== 0x303f) || // CJK ... Yi
-          (cp >= 0xac00 && cp <= 0xd7a3) || // Hangul Syllables
-          (cp >= 0xf900 && cp <= 0xfaff) || // CJK Compatibility Ideographs
-          (cp >= 0xfe10 && cp <= 0xfe6f) || // Fullwidth Forms
-          (cp >= 0xff01 && cp <= 0xff60) || // Fullwidth Latin
-          (cp >= 0xffe0 && cp <= 0xffe6) || // Fullwidth Signs
-          (cp >= 0x20000 && cp <= 0x2fffd) || // CJK Extension B+
-          (cp >= 0x30000 && cp <= 0x3fffd) ? 2 : 1
-        if (w + charW > maxWidth) break
-        w += charW
-        i += cp > 0xffff ? 2 : 1
-      }
-      return str.slice(0, i)
-    }
-
     return [
       formatLine(statusColor, `Ralph ${spinner} ${state?.phase ?? "running"}`),
       formatLine("accent", `pi-ralph v${RALPH_PLUGIN_VERSION}`),
@@ -730,7 +702,7 @@ async function promptFeatureDescription(ctx: ExtensionCommandContext): Promise<s
   while (true) {
     const value = await ctx.ui.input(
       "Feature Description",
-      "Describe the feature Ralph should plan and implement",
+      "描述需求，可包含 URL 或本地文档路径（如 ./docs/spec.md）",
       { signal: ctx.signal },
     )
     if (value === undefined) return undefined
@@ -944,6 +916,56 @@ function formatElapsed(ms: number): string {
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
 }
 
+// Visible width calculation: CJK chars = 2 cols, ANSI codes = 0 cols
+function visibleWidth(str: string): number {
+  let w = 0
+  let i = 0
+  while (i < str.length) {
+    if (str[i] === "\x1b") {
+      const end = str.indexOf("m", i)
+      if (end !== -1) { i = end + 1; continue }
+    }
+    const cp = str.codePointAt(i)!
+    const charW = (cp >= 0x1100 && cp <= 0x115f) ||
+      (cp >= 0x2e80 && cp <= 0xa4cf && cp !== 0x303f) ||
+      (cp >= 0xac00 && cp <= 0xd7a3) ||
+      (cp >= 0xf900 && cp <= 0xfaff) ||
+      (cp >= 0xfe10 && cp <= 0xfe6f) ||
+      (cp >= 0xff01 && cp <= 0xff60) ||
+      (cp >= 0xffe0 && cp <= 0xffe6) ||
+      (cp >= 0x20000 && cp <= 0x2fffd) ||
+      (cp >= 0x30000 && cp <= 0x3fffd) ? 2 : 1
+    w += charW
+    i += cp > 0xffff ? 2 : 1
+  }
+  return w
+}
+
+function truncateToWidth(str: string, maxWidth: number): string {
+  let w = 0
+  let i = 0
+  while (i < str.length && w < maxWidth) {
+    if (str[i] === "\x1b") {
+      const end = str.indexOf("m", i)
+      if (end !== -1) { i = end + 1; continue }
+    }
+    const cp = str.codePointAt(i)!
+    const charW = (cp >= 0x1100 && cp <= 0x115f) ||
+      (cp >= 0x2e80 && cp <= 0xa4cf && cp !== 0x303f) ||
+      (cp >= 0xac00 && cp <= 0xd7a3) ||
+      (cp >= 0xf900 && cp <= 0xfaff) ||
+      (cp >= 0xfe10 && cp <= 0xfe6f) ||
+      (cp >= 0xff01 && cp <= 0xff60) ||
+      (cp >= 0xffe0 && cp <= 0xffe6) ||
+      (cp >= 0x20000 && cp <= 0x2fffd) ||
+      (cp >= 0x30000 && cp <= 0x3fffd) ? 2 : 1
+    if (w + charW > maxWidth) break
+    w += charW
+    i += cp > 0xffff ? 2 : 1
+  }
+  return str.slice(0, i)
+}
+
 function formatProgressLabel(progress?: WorkerProgress): string {
   if (!progress) return "waiting for worker events"
   const event = progress.lastEvent
@@ -972,8 +994,11 @@ function setWorkerUiStatus(
   const termWidth = process.stdout.columns ?? 80
   const prefix = `Ralph ${phase}: `
   const suffix = ` (round ${roundElapsed} | total ${totalElapsed})${progressSuffix}`
-  const maxLabelLen = Math.max(20, termWidth - prefix.length - suffix.length)
-  const truncatedLabel = label.length > maxLabelLen ? label.slice(0, maxLabelLen - 1) + "…" : label
+  const fixedWidth = visibleWidth(prefix) + visibleWidth(suffix)
+  const maxLabelWidth = Math.max(20, termWidth - fixedWidth)
+  const truncatedLabel = visibleWidth(label) > maxLabelWidth
+    ? truncateToWidth(label, maxLabelWidth - 1) + "…"
+    : label
   const text = `${prefix}${truncatedLabel}${suffix}`
   busyEditorState = { phase, label, roundElapsed, totalElapsed, progress }
   busyUiTheme = ctx.ui.theme
@@ -1327,10 +1352,17 @@ async function handleStartNewTask(
     return false
   }
 
+  // Truncate long lines for display to avoid TUI crash
+  const termWidth = process.stdout.columns ?? 80
+  const displayDesc = featureDescription
+    .split("\n")
+    .map((line) => truncateToWidth(line, termWidth - 4))
+    .join("\n")
+
   ctx.ui.notify([
     "📋 Step 1/4: 需求已记录",
     "",
-    featureDescription,
+    displayDesc,
   ].join("\n"), "warning")
 
   // ── Intake: AI understands + asks 1-5 questions ─────────────────────
