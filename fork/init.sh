@@ -262,19 +262,21 @@ if [ "$IS_LOCAL" = true ] && [ -d "$PI_RALPH_SRC" ]; then
     ln -sfn "$PI_RALPH_SRC/index.ts" "$EXTENSIONS_DIR/pi-ralph.ts"
     echo -e "  ${GREEN}✓${RESET} pi-ralph → symlinked to $PI_RALPH_SRC"
 
-    for skill in prd ralph ralph-worker ralph-wizard; do
-        src="$PI_RALPH_SRC/skills/$skill/SKILL.md"
+    for skill_dir in "$PI_RALPH_SRC/skills"/*/; do
+        skill="$(basename "$skill_dir")"
+        src="$skill_dir/SKILL.md"
         if [ -f "$src" ]; then
             mkdir -p "$SKILLS_DIR/$skill"
             ln -sfn "$src" "$SKILLS_DIR/$skill/SKILL.md"
         fi
     done
-    echo -e "  ${GREEN}✓${RESET} ralph skills → symlinked to $SKILLS_DIR/{prd,ralph,ralph-worker,ralph-wizard}"
+    echo -e "  ${GREEN}✓${RESET} ralph skills → symlinked to $SKILLS_DIR"
 else
     if [ -d "$PI_RALPH_SRC" ]; then
         cp "$PI_RALPH_SRC/index.ts" "$EXTENSIONS_DIR/pi-ralph.ts"
-        for skill in prd ralph ralph-worker ralph-wizard; do
-            src="$PI_RALPH_SRC/skills/$skill/SKILL.md"
+        for skill_dir in "$PI_RALPH_SRC/skills"/*/; do
+            skill="$(basename "$skill_dir")"
+            src="$skill_dir/SKILL.md"
             if [ -f "$src" ]; then
                 mkdir -p "$SKILLS_DIR/$skill"
                 cp "$src" "$SKILLS_DIR/$skill/SKILL.md"
@@ -286,8 +288,9 @@ else
         TMPDIR_DL=$(mktemp -d)
         if git clone --depth 1 "$PI_RALPH_REPO" "$TMPDIR_DL/pi-ralph" 2>/dev/null; then
             cp "$TMPDIR_DL/pi-ralph/index.ts" "$EXTENSIONS_DIR/pi-ralph.ts"
-            for skill in prd ralph ralph-worker ralph-wizard; do
-                src="$TMPDIR_DL/pi-ralph/skills/$skill/SKILL.md"
+            for skill_dir in "$TMPDIR_DL/pi-ralph/skills"/*/; do
+                skill="$(basename "$skill_dir")"
+                src="$skill_dir/SKILL.md"
                 if [ -f "$src" ]; then
                     mkdir -p "$SKILLS_DIR/$skill"
                     cp "$src" "$SKILLS_DIR/$skill/SKILL.md"
