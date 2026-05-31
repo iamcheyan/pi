@@ -2588,7 +2588,7 @@ export class InteractiveMode {
 				await this.handleReloadCommand();
 				return;
 			}
-			if (text === "/debug") {
+			if (text === "/debug" && !this.session.extensionRunner.getCommand("debug")) {
 				this.handleDebugCommand();
 				this.editor.setText("");
 				return;
