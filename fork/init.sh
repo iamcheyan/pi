@@ -368,6 +368,47 @@ install_extensions() {
             rm -rf "$TMPDIR_DL"
         fi
     fi
+
+    # --- pi-spawn (extension + agents) ---
+    local PI_SPAWN_SRC="$SCRIPT_DIR/pi-spawn"
+
+    if [ "$IS_LOCAL" = true ] && [ -d "$PI_SPAWN_SRC" ]; then
+        ln -sfn "$PI_SPAWN_SRC/index.ts" "$EXTENSIONS_DIR/pi-spawn.ts"
+        ok "pi-spawn → symlinked"
+
+        # Copy agents if present
+        if [ -d "$PI_SPAWN_SRC/agents" ]; then
+            for agent_file in "$PI_SPAWN_SRC/agents"/*.md; do
+                [ -f "$agent_file" ] || continue
+                local agent_name
+                agent_name="$(basename "$agent_file")"
+                ln -sfn "$agent_file" "$HOME/.pi/agent/agents/$agent_name"
+            done
+            ok "pi-spawn agents → symlinked"
+        fi
+    fi
+
+    # --- pi-debug (extension + skills) ---
+    local PI_DEBUG_SRC="$SCRIPT_DIR/pi-debug"
+
+    if [ "$IS_LOCAL" = true ] && [ -d "$PI_DEBUG_SRC" ]; then
+        ln -sfn "$PI_DEBUG_SRC/index.ts" "$EXTENSIONS_DIR/pi-debug.ts"
+        ok "pi-debug → symlinked"
+
+        # Copy skills if present
+        if [ -d "$PI_DEBUG_SRC/skills" ]; then
+            for skill_dir in "$PI_DEBUG_SRC/skills"/*/; do
+                local skill
+                skill="$(basename "$skill_dir")"
+                local src="$skill_dir/SKILL.md"
+                if [ -f "$src" ]; then
+                    mkdir -p "$SKILLS_DIR/$skill"
+                    ln -sfn "$src" "$SKILLS_DIR/$skill/SKILL.md"
+                fi
+            done
+            ok "pi-debug skills → symlinked"
+        fi
+    fi
 }
 
 # =============================================================================

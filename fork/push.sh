@@ -13,10 +13,12 @@ RESET='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DATE=$(date +%Y%m%d)
 
-# Sub-repos to push
+# Sub-repos to push (must match fork/ directories that are git repos)
 REPOS=(
     "pi-minimal"
     "pi-opencode-config-reader"
+    "pi-ralph"
+    "ralph"
 )
 
 echo -e "${CYAN}Pushing sub-repos...${RESET}"
