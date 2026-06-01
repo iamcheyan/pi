@@ -23,24 +23,21 @@ load_nvm() {
   export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
   if [ -s "$NVM_DIR/nvm.sh" ]; then
     echo -e "${DIM}Loading nvm...${RESET}"
-    
+
     # nvm.sh is often incompatible with set -u and set -e
     set +eu
     source "$NVM_DIR/nvm.sh"
     set -eu
-    
-    local latest_node
-    # nvm ls can also be problematic with set -u
-    set +u
-    latest_node=$(nvm ls --no-colors 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sort -V | tail -1)
-    set -u
-    
-    if [ -n "$latest_node" ]; then
-      echo -e "${DIM}Using latest Node.js: $latest_node${RESET}"
-      set +e
-      nvm use "$latest_node" >/dev/null 2>&1
-      set -e
-    fi
+
+    # Try to use Node.js 22+ (required by this project)
+    set +e
+    nvm install 22 >/dev/null 2>&1
+    nvm use 22 >/dev/null 2>&1
+    set -e
+
+    local current_node
+    current_node=$(node --version 2>/dev/null || echo "unknown")
+    echo -e "${DIM}Using Node.js: $current_node${RESET}"
   fi
 }
 
