@@ -270,11 +270,31 @@ install_extensions() {
     SKILLS_DIR="$HOME/.pi/agent/skills"
     mkdir -p "$EXTENSIONS_DIR" "$THEMES_DIR" "$SKILLS_DIR"
 
+    # Helper: ensure a sub-repo is populated (clone if empty)
+    ensure_subrepo() {
+        local dir="$1"
+        local repo_url="$2"
+        local name="$3"
+
+        # If directory exists but is empty (git pull didn't fetch sub-repos)
+        if [ -d "$dir" ] && [ -z "$(ls -A "$dir" 2>/dev/null)" ]; then
+            info "Sub-repo $name is empty, cloning..."
+            if git clone --depth 1 "$repo_url" "$dir" 2>/dev/null; then
+                ok "Cloned $name into $dir"
+            else
+                warn "Failed to clone $name"
+                return 1
+            fi
+        fi
+        return 0
+    }
+
     # --- pi-minimal (extension + theme) ---
     local PI_MINIMAL_SRC="$SCRIPT_DIR/pi-minimal"
+    ensure_subrepo "$PI_MINIMAL_SRC" "$PI_MINIMAL_REPO" "pi-minimal"
 
-    if [ "$IS_LOCAL" = true ] && [ -d "$PI_MINIMAL_SRC/.git" ]; then
-        # Dev mode: symlink to local source
+    if [ -d "$PI_MINIMAL_SRC/.git" ]; then
+        # Has .git — symlink to local source
         ln -sfn "$PI_MINIMAL_SRC/extensions/index.ts" "$EXTENSIONS_DIR/pi-minimal.ts"
         ok "pi-minimal → symlinked"
 
@@ -282,44 +302,34 @@ install_extensions() {
             ln -sfn "$PI_MINIMAL_SRC/themes/minimal.json" "$THEMES_DIR/minimal.json"
             ok "minimal theme → symlinked"
         fi
+    elif [ -f "$PI_MINIMAL_SRC/extensions/index.ts" ]; then
+        # No .git but has files — copy
+        cp "$PI_MINIMAL_SRC/extensions/index.ts" "$EXTENSIONS_DIR/pi-minimal.ts"
+        cp "$PI_MINIMAL_SRC/themes/minimal.json" "$THEMES_DIR/minimal.json" 2>/dev/null || true
+        ok "pi-minimal → copied"
     else
-        # Remote mode: clone and copy
-        info "cloning pi-minimal..."
-        local TMPDIR_DL
-        TMPDIR_DL=$(mktemp -d)
-        if git clone --depth 1 "$PI_MINIMAL_REPO" "$TMPDIR_DL/pi-minimal" 2>/dev/null; then
-            cp "$TMPDIR_DL/pi-minimal/extensions/index.ts" "$EXTENSIONS_DIR/pi-minimal.ts"
-            cp "$TMPDIR_DL/pi-minimal/themes/minimal.json" "$THEMES_DIR/minimal.json"
-            ok "pi-minimal → copied"
-        else
-            warn "Failed to clone pi-minimal, skipping"
-        fi
-        rm -rf "$TMPDIR_DL"
+        warn "pi-minimal not available, skipping"
     fi
 
     # --- pi-opencode-config-reader ---
     local PI_OPENCODE_SRC="$SCRIPT_DIR/pi-opencode-config-reader"
+    ensure_subrepo "$PI_OPENCODE_SRC" "$PI_OPENCODE_CONFIG_READER_REPO" "pi-opencode-config-reader"
 
-    if [ "$IS_LOCAL" = true ] && [ -d "$PI_OPENCODE_SRC/.git" ]; then
+    if [ -d "$PI_OPENCODE_SRC/.git" ]; then
         ln -sfn "$PI_OPENCODE_SRC/opencode-config-reader.ts" "$EXTENSIONS_DIR/opencode-config-reader.ts"
         ok "pi-opencode-config-reader → symlinked"
+    elif [ -f "$PI_OPENCODE_SRC/opencode-config-reader.ts" ]; then
+        cp "$PI_OPENCODE_SRC/opencode-config-reader.ts" "$EXTENSIONS_DIR/opencode-config-reader.ts"
+        ok "pi-opencode-config-reader → copied"
     else
-        info "cloning pi-opencode-config-reader..."
-        local TMPDIR_DL
-        TMPDIR_DL=$(mktemp -d)
-        if git clone --depth 1 "$PI_OPENCODE_CONFIG_READER_REPO" "$TMPDIR_DL/pi-opencode-config-reader" 2>/dev/null; then
-            cp "$TMPDIR_DL/pi-opencode-config-reader/opencode-config-reader.ts" "$EXTENSIONS_DIR/opencode-config-reader.ts"
-            ok "pi-opencode-config-reader → copied"
-        else
-            warn "Failed to clone pi-opencode-config-reader, skipping"
-        fi
-        rm -rf "$TMPDIR_DL"
+        warn "pi-opencode-config-reader not available, skipping"
     fi
 
     # --- pi-ralph (extension + skills) ---
     local PI_RALPH_SRC="$SCRIPT_DIR/pi-ralph"
+    ensure_subrepo "$PI_RALPH_SRC" "$PI_RALPH_REPO" "pi-ralph"
 
-    if [ "$IS_LOCAL" = true ] && [ -d "$PI_RALPH_SRC" ]; then
+    if [ -d "$PI_RALPH_SRC" ]; then
         ln -sfn "$PI_RALPH_SRC/index.ts" "$EXTENSIONS_DIR/pi-ralph.ts"
         ok "pi-ralph → symlinked"
 
@@ -333,46 +343,12 @@ install_extensions() {
             fi
         done
         ok "ralph skills → symlinked"
-    else
-        if [ -d "$PI_RALPH_SRC" ]; then
-            cp "$PI_RALPH_SRC/index.ts" "$EXTENSIONS_DIR/pi-ralph.ts"
-            for skill_dir in "$PI_RALPH_SRC/skills"/*/; do
-                local skill
-                skill="$(basename "$skill_dir")"
-                local src="$skill_dir/SKILL.md"
-                if [ -f "$src" ]; then
-                    mkdir -p "$SKILLS_DIR/$skill"
-                    cp "$src" "$SKILLS_DIR/$skill/SKILL.md"
-                fi
-            done
-            ok "pi-ralph → copied"
-        else
-            info "cloning pi-ralph..."
-            local TMPDIR_DL
-            TMPDIR_DL=$(mktemp -d)
-            if git clone --depth 1 "$PI_RALPH_REPO" "$TMPDIR_DL/pi-ralph" 2>/dev/null; then
-                cp "$TMPDIR_DL/pi-ralph/index.ts" "$EXTENSIONS_DIR/pi-ralph.ts"
-                for skill_dir in "$TMPDIR_DL/pi-ralph/skills"/*/; do
-                    local skill
-                    skill="$(basename "$skill_dir")"
-                    local src="$skill_dir/SKILL.md"
-                    if [ -f "$src" ]; then
-                        mkdir -p "$SKILLS_DIR/$skill"
-                        cp "$src" "$SKILLS_DIR/$skill/SKILL.md"
-                    fi
-                done
-                ok "pi-ralph → copied"
-            else
-                warn "Failed to clone pi-ralph, skipping"
-            fi
-            rm -rf "$TMPDIR_DL"
-        fi
     fi
 
     # --- pi-spawn (extension + agents) ---
     local PI_SPAWN_SRC="$SCRIPT_DIR/pi-spawn"
 
-    if [ "$IS_LOCAL" = true ] && [ -d "$PI_SPAWN_SRC" ]; then
+    if [ -d "$PI_SPAWN_SRC" ]; then
         ln -sfn "$PI_SPAWN_SRC/index.ts" "$EXTENSIONS_DIR/pi-spawn.ts"
         ok "pi-spawn → symlinked"
 
@@ -391,7 +367,7 @@ install_extensions() {
     # --- pi-debug (extension + skills) ---
     local PI_DEBUG_SRC="$SCRIPT_DIR/pi-debug"
 
-    if [ "$IS_LOCAL" = true ] && [ -d "$PI_DEBUG_SRC" ]; then
+    if [ -d "$PI_DEBUG_SRC" ]; then
         ln -sfn "$PI_DEBUG_SRC/index.ts" "$EXTENSIONS_DIR/pi-debug.ts"
         ok "pi-debug → symlinked"
 
