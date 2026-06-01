@@ -435,7 +435,8 @@ if [ -n "${PI_REPO:-}" ]; then
 fi
 
 if [ -z "$PI_BIN_PATH" ]; then
-    for candidate in "$HOME/Development/pi" "$HOME/pi" "$HOME/repos/pi"; do
+    # Search common locations (case-insensitive for macOS/Linux)
+    for candidate in "$HOME/Development/pi" "$HOME/development/pi" "$HOME/pi" "$HOME/repos/pi"; do
         PI_BIN_PATH=$(find_pi "$candidate" 2>/dev/null || true)
         [ -n "$PI_BIN_PATH" ] && break
     done
