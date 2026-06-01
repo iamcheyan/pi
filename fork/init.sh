@@ -127,9 +127,23 @@ resolve_pi_bin() {
             return 0
         fi
 
-        # No binary found in local mode
-        warn "No compiled pi binary found in fork/dist/"
-        echo -e "    ${DIM}Build first: cd $REPO_DIR && bun run build${RESET}"
+        # No binary found — try to build
+        warn "No compiled pi binary found, attempting to build..."
+        if [ -f "$REPO_DIR/fork/build.sh" ]; then
+            echo ""
+            if bash "$REPO_DIR/fork/build.sh"; then
+                # Re-resolve after build
+                PI_BIN=$(find "$REPO_DIR/fork/dist/" -path "*/bin/pi" -type f -executable 2>/dev/null | head -1)
+                if [ -n "$PI_BIN" ]; then
+                    ok "Build successful"
+                    return 0
+                fi
+            fi
+            fail "Build failed"
+        else
+            fail "build.sh not found"
+        fi
+        echo -e "    ${DIM}Manual build: cd $REPO_DIR && bash fork/build.sh${RESET}"
         PI_BIN=""
         return 1
     fi
