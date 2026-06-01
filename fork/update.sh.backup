@@ -301,45 +301,8 @@ fi
 # Check remaining conflicts (after auto-resolving .github/)
 REMAINING=$(git ls-files --unmerged | awk -F'\t' '{print $2}' | sort -u 2>/dev/null || true)
 if [ -n "$REMAINING" ]; then
-  # Try auto-resolve with pi
-  PI_BIN="$ROOT_DIR/fork/dist/pi-darwin-arm64/bin/pi"
-  if [ -x "$PI_BIN" ]; then
-    echo -e "${YELLOW}Attempting auto-resolve with pi...${RESET}"
-    echo ""
-
-    RESOLVE_PROMPT="Resolve all merge conflicts in this repository. Rules:
-1. For packages/coding-agent/src/** files: prefer upstream changes, but keep any fork-specific modifications
-2. For fork/**: prefer fork side
-3. Remove all conflict markers (<<<<<<< ======= >>>>>>>)
-4. After resolving, stage the files with git add"
-
-    if "$PI_BIN" -p "$RESOLVE_PROMPT" \
-      --no-session \
-      --no-skills \
-      --no-prompt-templates \
-      --no-themes \
-      --no-context-files \
-      --no-extensions \
-      --dir "$ROOT_DIR" \
-      2>&1; then
-      # Check if conflicts are actually resolved
-      STILL_UNMERGED=$(git ls-files --unmerged | awk -F'\t' '{print $2}' | sort -u 2>/dev/null || true)
-      if [ -n "$STILL_UNMERGED" ]; then
-        echo -e "${YELLOW}pi could not resolve all conflicts.${RESET}"
-        print_conflict_help "$STILL_UNMERGED"
-        exit 1
-      fi
-      echo -e "${GREEN}pi resolved all conflicts.${RESET}"
-      REMAINING=""
-    else
-      echo -e "${YELLOW}pi failed to run. Falling back to manual resolution.${RESET}"
-      print_conflict_help "$REMAINING"
-      exit 1
-    fi
-  else
-    print_conflict_help "$REMAINING"
-    exit 1
-  fi
+  print_conflict_help "$REMAINING"
+  exit 1
 fi
 
 # If merge command itself failed but we resolved all conflicts, that's OK
