@@ -48,7 +48,8 @@ The draft must include these sections:
 6. Technical Considerations (when relevant)
 7. Open Questions (if anything remains uncertain)
 
-Save the draft to `tasks/prd-[feature-name-kebab-case].md`.
+Save the draft to the path specified in the task prompt (look for "Save the PRD draft to:" in the input).
+If no save path is specified, save to `prd-[feature-name-kebab-case].md` in the current directory.
 
 ## Output
 

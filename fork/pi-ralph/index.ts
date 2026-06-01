@@ -9,7 +9,7 @@
  */
 
 import { spawn, spawnSync } from "node:child_process"
-import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, symlinkSync, readdirSync, unlinkSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, symlinkSync, readdirSync, unlinkSync, rmSync } from "node:fs"
 import { join, dirname } from "node:path"
 import { homedir } from "node:os"
 import { fileURLToPath } from "node:url"
@@ -44,27 +44,6 @@ interface WorkerResult {
   completed: boolean
 }
 
-type HistoryStatus = "completed" | "archived"
-
-interface HistoryEntry {
-  id: string
-  archiveDir: string
-  project: string
-  branchName: string
-  description: string
-  storiesCompleted: number
-  storiesTotal: number
-  status: HistoryStatus
-  reason: string
-  createdAt: string
-  updatedAt: string
-}
-
-interface HistoryIndex {
-  version: 1
-  entries: HistoryEntry[]
-}
-
 interface DraftQuestion {
   question: string
   options: string[]
@@ -77,13 +56,21 @@ interface DraftAnswer {
 }
 
 interface DraftState {
-  version: 1
+  version: 2
   featureDescription: string
   understanding: string
-  prdPath: string
   questionAnswers: DraftAnswer[]
   createdAt: string
   updatedAt: string
+}
+
+// Path bundle for a task directory — all handlers use this instead of separate prdPath/progressPath
+interface TaskPaths {
+  taskDir: string
+  prdJson: string
+  prdMd: string
+  progress: string
+  taskJson: string
 }
 
 interface IntakeResult {
@@ -249,8 +236,213 @@ function formatTimestamp(): string {
   return new Date().toISOString().replace("T", " ").slice(0, 19)
 }
 
-function formatArchiveDirTimestamp(): string {
-  return new Date().toISOString().replace(/[-:]/g, "").replace(/\..+$/, "").replace("T", "-")
+// ============================================================================
+// Task directory management (new storage model)
+// ============================================================================
+
+function getRalphDir(cwd: string): string {
+  return join(cwd, "ralph")
+}
+
+/** Ensure ralph/ directory exists with a .gitignore to protect sensitive files */
+function ensureRalphDir(cwd: string): void {
+  const ralphDir = getRalphDir(cwd)
+  if (!existsSync(ralphDir)) {
+    mkdirSync(ralphDir, { recursive: true })
+  }
+  const gitignorePath = join(ralphDir, ".gitignore")
+  if (!existsSync(gitignorePath)) {
+    writeFileSync(gitignorePath, [
+      "# Ralph task files — safe to commit",
+      "prd.json",
+      "prd.md",
+      "task.json",
+      "",
+      "# Progress logs may contain sensitive execution details — exclude by default",
+      "progress.txt",
+      "",
+    ].join("\n"), "utf-8")
+  }
+}
+
+function makeTaskDirName(slug: string): string {
+  const now = new Date()
+  const pad = (n: number, w: number) => String(n).padStart(w, "0")
+  const yy = pad(now.getFullYear() % 100, 2)
+  const mm = pad(now.getMonth() + 1, 2)
+  const dd = pad(now.getDate(), 2)
+  const hh = pad(now.getHours(), 2)
+  const mi = pad(now.getMinutes(), 2)
+  const ss = pad(now.getSeconds(), 2)
+  const ms = pad(now.getMilliseconds(), 3)
+  const cleanSlug = slug.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "task"
+  return `${yy}${mm}${dd}-${hh}${mi}${ss}-${ms}-${cleanSlug}`
+}
+
+function makeTaskPaths(cwd: string, taskDirName: string): TaskPaths {
+  const taskDir = join(getRalphDir(cwd), taskDirName)
+  return {
+    taskDir,
+    prdJson: join(taskDir, "prd.json"),
+    prdMd: join(taskDir, "prd.md"),
+    progress: join(taskDir, "progress.txt"),
+    taskJson: join(taskDir, "task.json"),
+  }
+}
+
+function listTaskDirs(cwd: string): string[] {
+  const ralphDir = getRalphDir(cwd)
+  if (!existsSync(ralphDir)) return []
+  return readdirSync(ralphDir, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && /^\d{6}-\d{6}-\d{3}-/.test(e.name))
+    .map((e) => join(ralphDir, e.name))
+    .sort((a, b) => b.localeCompare(a)) // newest first
+}
+
+function getTaskDirName(taskDir: string): string {
+  const parts = taskDir.split("/")
+  return parts[parts.length - 1] || taskDir
+}
+
+function getTaskSlug(taskDirName: string): string {
+  const match = taskDirName.match(/^\d{6}-\d{6}-\d{3}-(.+)$/)
+  return match ? match[1] : taskDirName
+}
+
+/** Find the newest task dir that has a prd.json with incomplete stories */
+function findActiveTaskDir(cwd: string): TaskPaths | null {
+  for (const dir of listTaskDirs(cwd)) {
+    const paths: TaskPaths = {
+      taskDir: dir,
+      prdJson: join(dir, "prd.json"),
+      prdMd: join(dir, "prd.md"),
+      progress: join(dir, "progress.txt"),
+      taskJson: join(dir, "task.json"),
+    }
+    const prd = readJsonFile(paths.prdJson) as PrdJson | null
+    if (prd?.userStories && Array.isArray(prd.userStories) && !allStoriesComplete(prd)) {
+      return paths
+    }
+  }
+  return null
+}
+
+/** Find the newest completed task (all stories passed) for congratulatory display */
+function findLatestCompletedTask(cwd: string): { paths: TaskPaths; prd: PrdJson } | null {
+  for (const dir of listTaskDirs(cwd)) {
+    const paths: TaskPaths = {
+      taskDir: dir,
+      prdJson: join(dir, "prd.json"),
+      prdMd: join(dir, "prd.md"),
+      progress: join(dir, "progress.txt"),
+      taskJson: join(dir, "task.json"),
+    }
+    const prd = readJsonFile(paths.prdJson) as PrdJson | null
+    if (prd?.userStories && Array.isArray(prd.userStories) && allStoriesComplete(prd)) {
+      return { paths, prd }
+    }
+  }
+  return null
+}
+
+/** Find the newest task dir that has task.json but no prd.json (draft in progress) */
+function findDraftTaskDir(cwd: string): TaskPaths | null {
+  for (const dir of listTaskDirs(cwd)) {
+    const paths: TaskPaths = {
+      taskDir: dir,
+      prdJson: join(dir, "prd.json"),
+      prdMd: join(dir, "prd.md"),
+      progress: join(dir, "progress.txt"),
+      taskJson: join(dir, "task.json"),
+    }
+    const task = readJsonFile(paths.taskJson)
+    if (task && !existsSync(paths.prdJson)) {
+      return paths
+    }
+  }
+  return null
+}
+
+function readDraftStateFromTask(paths: TaskPaths): DraftState | null {
+  const parsed = readJsonFile(paths.taskJson)
+  if (!parsed || typeof parsed !== "object") return null
+  // Accept both v1 (with prdPath) and v2 (without)
+  if (!("featureDescription" in parsed) || typeof parsed.featureDescription !== "string") return null
+  if (!("understanding" in parsed) || typeof parsed.understanding !== "string") return null
+  if (!("questionAnswers" in parsed) || !Array.isArray(parsed.questionAnswers)) return null
+
+  return {
+    version: 2,
+    featureDescription: parsed.featureDescription,
+    understanding: parsed.understanding,
+    questionAnswers: parsed.questionAnswers as DraftAnswer[],
+    createdAt: "createdAt" in parsed && typeof parsed.createdAt === "string" ? parsed.createdAt : formatTimestamp(),
+    updatedAt: "updatedAt" in parsed && typeof parsed.updatedAt === "string" ? parsed.updatedAt : formatTimestamp(),
+  }
+}
+
+function writeDraftStateToTask(paths: TaskPaths, draft: DraftState): void {
+  mkdirSync(paths.taskDir, { recursive: true })
+  writeFileSync(paths.taskJson, `${JSON.stringify(draft, null, 2)}\n`, "utf-8")
+}
+
+/** Backward-compat: migrate old-style files in cwd/ into ralph/ directory */
+function migrateLegacyTask(cwd: string): TaskPaths | null {
+  const oldPrdPath = join(cwd, "prd.json")
+  const oldProgressPath = join(cwd, "progress.txt")
+  const oldDraftPath = join(cwd, ".ralph-draft.json")
+
+  // Only migrate if old files exist and ralph/ doesn't
+  if (!existsSync(oldPrdPath) && !existsSync(oldDraftPath)) return null
+  if (existsSync(getRalphDir(cwd))) return null
+
+  const prd = readJsonFile(oldPrdPath) as PrdJson | null
+  const slug = prd?.project
+    ? prd.project.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40)
+    : "migrated"
+
+  const dirName = makeTaskDirName(slug)
+  const paths = makeTaskPaths(cwd, dirName)
+  ensureRalphDir(cwd)
+  mkdirSync(paths.taskDir, { recursive: true })
+
+  if (existsSync(oldPrdPath)) copyFileSync(oldPrdPath, paths.prdJson)
+  if (existsSync(oldProgressPath)) copyFileSync(oldProgressPath, paths.progress)
+
+  // Migrate draft state
+  if (existsSync(oldDraftPath)) {
+    const oldDraft = readJsonFile(oldDraftPath) as Record<string, unknown> | null
+    if (oldDraft) {
+      const newDraft: DraftState = {
+        version: 2,
+        featureDescription: (oldDraft.featureDescription as string) ?? "",
+        understanding: (oldDraft.understanding as string) ?? "",
+        questionAnswers: (oldDraft.questionAnswers as DraftAnswer[]) ?? [],
+        createdAt: (oldDraft.createdAt as string) ?? formatTimestamp(),
+        updatedAt: (oldDraft.updatedAt as string) ?? formatTimestamp(),
+      }
+      writeFileSync(paths.taskJson, `${JSON.stringify(newDraft, null, 2)}\n`, "utf-8")
+    }
+    unlinkSync(oldDraftPath)
+  }
+
+  // Migrate archive directory
+  const oldArchiveDir = join(cwd, "archive")
+  if (existsSync(oldArchiveDir)) {
+    const archiveDest = join(paths.taskDir, "archive")
+    mkdirSync(archiveDest, { recursive: true })
+    for (const entry of readdirSync(oldArchiveDir, { withFileTypes: true })) {
+      const src = join(oldArchiveDir, entry.name)
+      const dest = join(archiveDest, entry.name)
+      if (entry.isDirectory()) {
+        // Skip — old archive subdirectories are not needed in new model
+      } else {
+        copyFileSync(src, dest)
+      }
+    }
+  }
+
+  return paths
 }
 
 function getCurrentTaskSummary(prd: PrdJson): CurrentTaskSummary {
@@ -265,223 +457,26 @@ function getCurrentTaskSummary(prd: PrdJson): CurrentTaskSummary {
   }
 }
 
-function sanitizeArchiveSlug(value: string): string {
-  const slug = value
-    .toLowerCase()
-    .replace(/^ralph\//, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-  return slug || "task"
-}
-
-function getArchiveRoot(cwd: string): string {
-  return join(cwd, "archive")
-}
-
-function getHistoryIndexPath(cwd: string): string {
-  return join(getArchiveRoot(cwd), "history.json")
-}
-
-function readHistoryIndex(cwd: string): HistoryIndex {
-  const parsed = readJsonFile(getHistoryIndexPath(cwd))
-  if (!parsed || typeof parsed !== "object" || !("entries" in parsed) || !Array.isArray(parsed.entries)) {
-    return { version: 1, entries: [] }
-  }
-  return { version: 1, entries: parsed.entries as HistoryEntry[] }
-}
-
-function writeHistoryEntries(cwd: string, entries: HistoryEntry[]): void {
-  mkdirSync(getArchiveRoot(cwd), { recursive: true })
-  writeFileSync(
-    getHistoryIndexPath(cwd),
-    `${JSON.stringify({ version: 1, entries }, null, 2)}\n`,
-    "utf-8",
-  )
-}
-
-function parseArchiveTimestamp(dirName: string): string | undefined {
-  const compactMatch = dirName.match(/^(\d{8})-(\d{6})/)
-  if (compactMatch) {
-    const [, datePart, timePart] = compactMatch
-    return [
-      `${datePart.slice(0, 4)}-${datePart.slice(4, 6)}-${datePart.slice(6, 8)}`,
-      `${timePart.slice(0, 2)}:${timePart.slice(2, 4)}:${timePart.slice(4, 6)}`,
-    ].join(" ")
-  }
-
-  const dateMatch = dirName.match(/^(\d{4}-\d{2}-\d{2})/)
-  if (dateMatch) {
-    return `${dateMatch[1]} 00:00:00`
-  }
-
-  return undefined
-}
-
-function createHistoryEntry(prd: PrdJson, archiveDir: string, timestamp: string, reason: string): HistoryEntry {
-  const summary = getCurrentTaskSummary(prd)
-  return {
-    id: archiveDir,
-    archiveDir,
-    project: prd.project,
-    branchName: prd.branchName,
-    description: prd.description,
-    storiesCompleted: summary.storiesCompleted,
-    storiesTotal: summary.storiesTotal,
-    status: summary.storiesRemaining === 0 ? "completed" : "archived",
-    reason,
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  }
-}
-
-function discoverArchiveEntries(cwd: string): HistoryEntry[] {
-  const archiveRoot = getArchiveRoot(cwd)
-  if (!existsSync(archiveRoot)) return []
-
-  const discovered: HistoryEntry[] = []
-  for (const entry of readdirSync(archiveRoot, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue
-    const archiveDir = entry.name
-    const archivePrdPath = join(archiveRoot, archiveDir, "prd.json")
-    const prd = readJsonFile(archivePrdPath) as PrdJson | null
-    if (!prd?.userStories || !Array.isArray(prd.userStories)) continue
-    const timestamp = parseArchiveTimestamp(archiveDir) ?? formatTimestamp()
-    discovered.push(createHistoryEntry(prd, archiveDir, timestamp, "legacy archive"))
-  }
-  return discovered
-}
-
-function getHistoryEntries(cwd: string): HistoryEntry[] {
-  const storedEntries = readHistoryIndex(cwd).entries
-  const entriesById = new Map<string, HistoryEntry>()
-  for (const entry of storedEntries) {
-    entriesById.set(entry.id, entry)
-  }
-  for (const entry of discoverArchiveEntries(cwd)) {
-    if (!entriesById.has(entry.id)) {
-      entriesById.set(entry.id, entry)
-    }
-  }
-
-  const entries = [...entriesById.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-  const storedIds = storedEntries.map((entry) => entry.id).join("|")
-  const entryIds = entries.map((entry) => entry.id).join("|")
-  if (storedEntries.length !== entries.length || storedIds !== entryIds) {
-    writeHistoryEntries(cwd, entries)
-  }
-  return entries
-}
-
-function archiveCurrentRun(cwd: string, prdPath: string, progressPath: string, reason: string): HistoryEntry | null {
-  const prd = readJsonFile(prdPath) as PrdJson | null
-  if (!prd?.userStories || !Array.isArray(prd.userStories)) return null
-
-  const archiveRoot = getArchiveRoot(cwd)
-  mkdirSync(archiveRoot, { recursive: true })
-
-  const archiveBaseName = `${formatArchiveDirTimestamp()}-${sanitizeArchiveSlug(prd.branchName || prd.project)}`
-  let archiveDir = archiveBaseName
-  let suffix = 2
-  while (existsSync(join(archiveRoot, archiveDir))) {
-    archiveDir = `${archiveBaseName}-${suffix}`
-    suffix += 1
-  }
-
-  const archivePath = join(archiveRoot, archiveDir)
-  mkdirSync(archivePath, { recursive: true })
-  copyFileSync(prdPath, join(archivePath, "prd.json"))
-  if (existsSync(progressPath)) {
-    copyFileSync(progressPath, join(archivePath, "progress.txt"))
-  }
-
-  const timestamp = formatTimestamp()
-  const entry = createHistoryEntry(prd, archiveDir, timestamp, reason)
-  const entries = [entry, ...getHistoryEntries(cwd).filter((existing) => existing.id !== entry.id)]
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-  writeHistoryEntries(cwd, entries)
-  return entry
-}
-
-function getHistoryPrdPath(cwd: string, entry: HistoryEntry): string {
-  return join(getArchiveRoot(cwd), entry.archiveDir, "prd.json")
-}
-
-function getHistoryProgressPath(cwd: string, entry: HistoryEntry): string {
-  return join(getArchiveRoot(cwd), entry.archiveDir, "progress.txt")
-}
-
-function getDraftStatePath(cwd: string): string {
-  return join(cwd, ".ralph-draft.json")
-}
-
-function readDraftState(cwd: string): DraftState | null {
-  const parsed = readJsonFile(getDraftStatePath(cwd))
-  if (!parsed || typeof parsed !== "object") return null
-  if (!("prdPath" in parsed) || typeof parsed.prdPath !== "string") return null
-  if (!("featureDescription" in parsed) || typeof parsed.featureDescription !== "string") return null
-  if (!("understanding" in parsed) || typeof parsed.understanding !== "string") return null
-  if (!("questionAnswers" in parsed) || !Array.isArray(parsed.questionAnswers)) return null
-
-  return {
-    version: 1,
-    featureDescription: parsed.featureDescription,
-    understanding: parsed.understanding,
-    prdPath: parsed.prdPath,
-    questionAnswers: parsed.questionAnswers as DraftAnswer[],
-    createdAt: "createdAt" in parsed && typeof parsed.createdAt === "string" ? parsed.createdAt : formatTimestamp(),
-    updatedAt: "updatedAt" in parsed && typeof parsed.updatedAt === "string" ? parsed.updatedAt : formatTimestamp(),
-  }
-}
-
-function writeDraftState(cwd: string, draft: DraftState): void {
-  writeFileSync(getDraftStatePath(cwd), `${JSON.stringify(draft, null, 2)}\n`, "utf-8")
-}
-
-function clearDraftState(cwd: string): void {
-  const statePath = getDraftStatePath(cwd)
-  if (existsSync(statePath)) {
-    unlinkSync(statePath)
-  }
-}
-
-function resolveDraftPrdPath(cwd: string, prdPath: string): string {
-  return prdPath.startsWith("/") ? prdPath : join(cwd, prdPath)
-}
-
-function clearCurrentTaskFiles(prdPath: string, progressPath: string): void {
-  if (existsSync(prdPath)) unlinkSync(prdPath)
-  if (existsSync(progressPath)) unlinkSync(progressPath)
-}
-
 function getProgressTail(progressPath: string, maxLines = 20): string {
   if (!existsSync(progressPath)) return "No progress log was archived."
   const lines = readFileSync(progressPath, "utf-8").split("\n")
   return lines.slice(Math.max(0, lines.length - maxLines)).join("\n").trim() || "No progress log was archived."
 }
 
-function formatHistoryStatus(status: HistoryStatus): string {
-  return status === "completed" ? "completed" : "archived"
-}
-
-function formatHistoryOption(entry: HistoryEntry): string {
-  return [
-    entry.updatedAt,
-    `${entry.storiesCompleted}/${entry.storiesTotal}`,
-    formatHistoryStatus(entry.status),
-    entry.description,
-  ].join(" | ")
-}
-
-function formatDraftSummary(draft: DraftState): string {
+function formatDraftSummary(draft: DraftState, taskDirName?: string): string {
   const lines = [
     "Draft PRD awaiting review",
     `Feature:   ${draft.featureDescription}`,
-    `Draft:     ${draft.prdPath}`,
-    `Updated:   ${draft.updatedAt}`,
-    "",
-    "Ralph's understanding:",
-    draft.understanding,
   ]
+
+  if (taskDirName) {
+    lines.push(`Dir:       ralph/${taskDirName}/`)
+  }
+
+  lines.push(`Updated:   ${draft.updatedAt}`)
+  lines.push("")
+  lines.push("Ralph's understanding:")
+  lines.push(draft.understanding)
 
   if (draft.questionAnswers.length > 0) {
     lines.push("")
@@ -495,32 +490,45 @@ function formatDraftSummary(draft: DraftState): string {
   return lines.join("\n")
 }
 
-function formatHomeSummary(currentPrd: PrdJson | null, draft: DraftState | null, historyEntries: HistoryEntry[]): string {
+function formatHomeSummary(
+  activePrd: PrdJson | null,
+  activeDirName: string | null,
+  draftState: DraftState | null,
+  draftDirName: string | null,
+  completedPrd: PrdJson | null,
+  completedDirName: string | null,
+  taskCount: number,
+): string {
   const lines = [
     `Ralph Home (pi-ralph v${RALPH_PLUGIN_VERSION})`,
     "",
   ]
 
-  if (currentPrd?.userStories && Array.isArray(currentPrd.userStories)) {
-    const summary = getCurrentTaskSummary(currentPrd)
+  if (activePrd?.userStories && Array.isArray(activePrd.userStories)) {
+    const summary = getCurrentTaskSummary(activePrd)
     lines.push(`Current:   ${summary.prd.description}`)
     lines.push(`Branch:    ${summary.prd.branchName}`)
+    lines.push(`Dir:       ralph/${activeDirName}/`)
     lines.push(`Progress:  ${summary.storiesCompleted}/${summary.storiesTotal} stories complete`)
     if (summary.nextStory) {
       lines.push(`Next:      ${summary.nextStory.id} — ${summary.nextStory.title}`)
     } else {
       lines.push("Next:      all stories complete")
     }
+  } else if (completedPrd?.userStories && completedDirName) {
+    const total = completedPrd.userStories.length
+    lines.push(`✅ Last task completed: ${completedPrd.description}`)
+    lines.push(`   Dir: ralph/${completedDirName}/  (${total}/${total} stories)`)
   } else {
     lines.push("Current:   no active Ralph task")
   }
 
-  if (draft) {
-    lines.push(`Draft:     ${draft.prdPath}`)
-    lines.push(`Draft At:  ${draft.updatedAt}`)
+  if (draftState && draftDirName) {
+    lines.push(`Draft:     ralph/${draftDirName}/`)
+    lines.push(`Feature:   ${draftState.featureDescription.slice(0, 60)}`)
   }
 
-  lines.push(`History:   ${historyEntries.length} archived runs`)
+  lines.push(`History:   ${taskCount} task(s) in ralph/`)
   return lines.join("\n")
 }
 
@@ -543,52 +551,8 @@ function formatResumeSummary(prd: PrdJson): string {
   return lines.join("\n")
 }
 
-function formatHistorySummary(entry: HistoryEntry, prd: PrdJson | null): string {
-  const lines = [
-    `Archive:   archive/${entry.archiveDir}`,
-    `Project:   ${entry.project}`,
-    `Branch:    ${entry.branchName}`,
-    `Feature:   ${entry.description}`,
-    `Status:    ${formatHistoryStatus(entry.status)}`,
-    `Progress:  ${entry.storiesCompleted}/${entry.storiesTotal} stories complete`,
-    `Archived:  ${entry.updatedAt}`,
-    `Reason:    ${entry.reason}`,
-  ]
-
-  if (prd?.userStories && Array.isArray(prd.userStories)) {
-    const nextStory = findNextStory(prd)
-    lines.push("")
-    if (nextStory) {
-      lines.push(`Next story at restore time: ${nextStory.id} — ${nextStory.title}`)
-    } else {
-      lines.push("Next story at restore time: none")
-    }
-  }
-
-  return lines.join("\n")
-}
-
-function formatHistoryComparison(currentPrd: PrdJson, historyEntry: HistoryEntry, historyPrd: PrdJson | null): string {
-  const current = getCurrentTaskSummary(currentPrd)
-  const archived = historyPrd ? getCurrentTaskSummary(historyPrd) : null
-
-  return [
-    "Current vs archived task",
-    "",
-    `Current feature:  ${current.prd.description}`,
-    `Archive feature:  ${historyEntry.description}`,
-    `Current branch:   ${current.prd.branchName}`,
-    `Archive branch:   ${historyEntry.branchName}`,
-    `Current stories:  ${current.storiesCompleted}/${current.storiesTotal}`,
-    `Archive stories:  ${historyEntry.storiesCompleted}/${historyEntry.storiesTotal}`,
-    `Current next:     ${current.nextStory ? `${current.nextStory.id} — ${current.nextStory.title}` : "none"}`,
-    `Archive next:     ${archived?.nextStory ? `${archived.nextStory.id} — ${archived.nextStory.title}` : "none"}`,
-    `Archive updated:  ${historyEntry.updatedAt}`,
-  ].join("\n")
-}
-
 // ============================================================================
-// Archive
+// Git helpers
 // ============================================================================
 
 type GitCommandResult = {
@@ -887,12 +851,31 @@ function getFinalOutput(messages: Message[]): string {
 
 function extractJsonObject(text: string): string | null {
   const stripped = text
+    // Strip thinking blocks — model reasoning contains { } that break brace matching
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<thinking>[\s\S]*?<\/thinking>/gi, "")
     .replace(/<promise>COMPLETE<\/promise>/g, "")
     .replace(/^```json\s*/i, "")
     .replace(/^```\s*/i, "")
     .replace(/\s*```$/i, "")
     .trim()
 
+  // Find the first complete top-level JSON object by tracking brace depth
+  let start = -1
+  let depth = 0
+  for (let i = 0; i < stripped.length; i++) {
+    if (stripped[i] === "{") {
+      if (depth === 0) start = i
+      depth++
+    } else if (stripped[i] === "}") {
+      depth--
+      if (depth === 0 && start !== -1) {
+        return stripped.slice(start, i + 1)
+      }
+    }
+  }
+
+  // Fallback: greedy approach
   const firstBrace = stripped.indexOf("{")
   const lastBrace = stripped.lastIndexOf("}")
   if (firstBrace === -1 || lastBrace === -1 || lastBrace < firstBrace) return null
@@ -1138,7 +1121,9 @@ async function runJsonSkillWorker<T>(
     return null
   }
 
-  return { data, rawOutput }
+  // Deep-clone to ensure the returned object is mutable —
+  // JSON.parse results can be frozen in some runtime contexts
+  return { data: JSON.parse(JSON.stringify(data)) as T, rawOutput }
 }
 
 async function promptCustomClarification(ctx: ExtensionCommandContext, question: string): Promise<string | undefined> {
@@ -1275,8 +1260,7 @@ function formatStatus(prd: PrdJson): string {
 
 async function handleResumeCurrentTask(
   ctx: ExtensionCommandContext,
-  prdPath: string,
-  progressPath: string,
+  paths: TaskPaths,
   prd: PrdJson,
 ): Promise<boolean> {
   if (!(await ensureGitRepo(ctx))) return false
@@ -1288,6 +1272,8 @@ async function handleResumeCurrentTask(
     [
       formatResumeSummary(prd),
       "",
+      `目录: ralph/${getTaskDirName(paths.taskDir)}/`,
+      "",
       "Continue this Ralph task now?",
     ].join("\n"),
     { signal: ctx.signal },
@@ -1295,55 +1281,44 @@ async function handleResumeCurrentTask(
   if (!shouldResume) return false
 
   await maybeOfferInitialPush(ctx, ctx.cwd)
-  await startLoop(ctx, prdPath, progressPath, prd.userStories.length)
+  await startLoop(ctx, paths, prd.userStories.length)
   return true
 }
 
 async function handleStartNewTask(
   ctx: ExtensionCommandContext,
-  prdPath: string,
-  progressPath: string,
-  existingPrd: PrdJson | null,
-  existingDraft: DraftState | null,
+  activePaths: TaskPaths | null,
+  activePrd: PrdJson | null,
+  draftPaths: TaskPaths | null,
+  draftState: DraftState | null,
 ): Promise<boolean> {
   const cwd = ctx.cwd
 
   // Ensure we're in a git repo — ralph depends on git for tracking changes
   if (!(await ensureGitRepo(ctx))) return false
 
-  let shouldArchiveCurrentTask = false
-
-  // Build a single combined confirmation if there's existing work to replace
-  const hasDraft = !!existingDraft
-  const hasPrd = !!(existingPrd?.userStories && Array.isArray(existingPrd.userStories))
-
-  if (hasDraft || hasPrd) {
-    const lines: string[] = ["Ralph 同时只能执行一个任务。"]
-    if (hasPrd) {
-      const summary = getCurrentTaskSummary(existingPrd!)
+  // If there's an active task or draft, inform the user (no archiving needed — new task gets a new directory)
+  if (activePrd || draftState) {
+    const lines: string[] = ["已存在进行中的任务，但每个任务有独立目录，不会丢失。"]
+    if (activePrd) {
+      const summary = getCurrentTaskSummary(activePrd)
       lines.push(
         "",
-        `当前任务: ${existingPrd!.description}`,
-        `分支: ${existingPrd!.branchName}`,
+        `当前任务: ${activePrd.description}`,
+        `目录: ralph/${getTaskDirName(activePaths!.taskDir)}/`,
         `进度: ${summary.storiesCompleted}/${summary.storiesTotal} stories`,
       )
     }
-    if (hasDraft) {
-      lines.push(`草稿: ${existingDraft!.prdPath}`)
+    if (draftState) {
+      lines.push(`草稿目录: ralph/${getTaskDirName(draftPaths!.taskDir)}/`)
     }
-    lines.push(
-      "",
-      "开始新任务后，当前任务将被归档（可查看但不可继续）。",
-      "如需恢复旧任务的工作，需基于归档记录创建新任务。",
-    )
+    lines.push("", "将创建新的任务目录。")
 
-    const confirmed = await ctx.ui.confirm("归档并开始新任务？", lines.join("\n"), { signal: ctx.signal })
+    const confirmed = await ctx.ui.confirm("开始新任务？", lines.join("\n"), { signal: ctx.signal })
     if (!confirmed) {
-      ctx.ui.notify("已取消。当前任务保持不变。", "warning")
+      ctx.ui.notify("已取消。", "warning")
       return false
     }
-
-    shouldArchiveCurrentTask = hasPrd
   }
 
   const featureDescription = await promptFeatureDescription(ctx)
@@ -1400,6 +1375,31 @@ async function handleStartNewTask(
     allAnswers.push(...answer)
   }
 
+  // ── Create task directory ───────────────────────────────────────────
+  const slug = understanding.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "task"
+  const taskDirName = makeTaskDirName(slug)
+  ensureRalphDir(cwd)
+  const paths = makeTaskPaths(cwd, taskDirName)
+  mkdirSync(paths.taskDir, { recursive: true })
+
+  ctx.ui.notify([
+    `📁 任务目录: ralph/${taskDirName}/`,
+    "⚠️ 请勿在需求描述或回答中包含 API key、密码等敏感信息（文件会被 git 跟踪）",
+  ].join("\n"), "warning")
+
+  // Save draft state to task directory
+  const now = formatTimestamp()
+  const draftStateNew: DraftState = {
+    version: 2,
+    featureDescription,
+    understanding,
+    questionAnswers: allAnswers,
+    createdAt: now,
+    updatedAt: now,
+  }
+  writeDraftStateToTask(paths, draftStateNew)
+
+  // ── Generate PRD draft ──────────────────────────────────────────────
   const allClarifications = formatDraftAnswers(allAnswers)
   let draftRound = 0
   let draftResult: { data: DraftReadyResult; rawOutput: string } | null = null
@@ -1415,6 +1415,8 @@ async function handleStartNewTask(
       "",
       "Clarifications:",
       allClarifications,
+      "",
+      `Save the PRD draft to: ${paths.prdMd}`,
     ].join("\n")
 
     ctx.ui.notify(`📝 Step 3/4: AI 正在${draftRound > 1 ? "重新" : ""}生成 PRD 文档...`, "warning")
@@ -1455,37 +1457,28 @@ async function handleStartNewTask(
     break
   }
 
-  const draftAbsolutePath = resolveDraftPrdPath(cwd, draftResult.data.prdPath)
-  if (!existsSync(draftAbsolutePath)) {
+  // The PRD draft may have been saved by the worker — check both the worker's reported path and our expected path
+  const workerPrdPath = draftResult.data.prdPath.startsWith("/")
+    ? draftResult.data.prdPath
+    : join(cwd, draftResult.data.prdPath)
+  const prdMdExists = existsSync(paths.prdMd) || existsSync(workerPrdPath)
+
+  if (!prdMdExists) {
     ctx.ui.notify([
       "❌ PRD 生成失败 — 文件未找到",
       "",
-      `Expected: ${draftResult.data.prdPath}`,
+      `Expected: ralph/${taskDirName}/prd.md`,
+      `Worker reported: ${draftResult.data.prdPath}`,
     ].join("\n"), "error")
     return false
   }
 
-  ctx.ui.notify(`✅ Step 4/4: PRD 文档已生成 → ${draftResult.data.prdPath}`, "warning")
-
-  if (shouldArchiveCurrentTask) {
-    const archived = archiveCurrentRun(cwd, prdPath, progressPath, "replaced by a new task draft")
-    if (archived) {
-      ctx.ui.notify(`Archived current task to archive/${archived.archiveDir}.`, "info")
-    }
-    clearCurrentTaskFiles(prdPath, progressPath)
+  // If worker saved to a different path, copy it to our task directory
+  if (!existsSync(paths.prdMd) && existsSync(workerPrdPath)) {
+    copyFileSync(workerPrdPath, paths.prdMd)
   }
 
-  const now = formatTimestamp()
-  const draftState: DraftState = {
-    version: 1,
-    featureDescription,
-    understanding,
-    prdPath: draftResult.data.prdPath,
-    questionAnswers: allAnswers,
-    createdAt: existingDraft?.createdAt ?? now,
-    updatedAt: now,
-  }
-  writeDraftState(cwd, draftState)
+  ctx.ui.notify(`✅ Step 4/4: PRD 文档已生成 → ralph/${taskDirName}/prd.md`, "warning")
 
   // ── Convert draft to prd.json ──────────────────────────────────────
   const converterSkillPath = resolveSkillPath("ralph", cwd)
@@ -1501,13 +1494,20 @@ async function handleStartNewTask(
   for (let attempt = 1; attempt <= MAX_CONVERT_ATTEMPTS; attempt++) {
     ctx.ui.notify(`🔄 正在将草稿转换为 prd.json...${attempt > 1 ? ` (第 ${attempt} 次尝试)` : ""}`, "warning")
 
-    const convertStatus = startWorkerStatus(ctx, `Convert ${draftResult.data.prdPath}`, Date.now())
-    const convertWorker = await runWorker(cwd, `PRD file: ${draftResult.data.prdPath}`, converterSkillPath, ctx.signal, convertStatus.update)
-    convertStatus.finish(convertWorker.exitCode === 0 && existsSync(prdPath) ? "completed" : "failed")
+    const convertStatus = startWorkerStatus(ctx, `Convert ralph/${taskDirName}/prd.md`, Date.now())
+    // Tell the converter to generate prd.json inside the task directory
+    const convertWorker = await runWorker(
+      cwd,
+      `PRD file: ${paths.prdMd}\n\nIMPORTANT: Save the generated prd.json to: ${paths.prdJson}`,
+      converterSkillPath,
+      ctx.signal,
+      convertStatus.update,
+    )
+    convertStatus.finish(convertWorker.exitCode === 0 && existsSync(paths.prdJson) ? "completed" : "failed")
 
     // Check if conversion succeeded
-    if (convertWorker.exitCode === 0 && existsSync(prdPath)) {
-      prd = readJsonFile(prdPath) as PrdJson | null
+    if (convertWorker.exitCode === 0 && existsSync(paths.prdJson)) {
+      prd = readJsonFile(paths.prdJson) as PrdJson | null
       if (prd?.userStories && Array.isArray(prd.userStories)) {
         break // Success!
       }
@@ -1516,7 +1516,7 @@ async function handleStartNewTask(
     // Conversion failed — AI attempts to fix
     if (attempt < MAX_CONVERT_ATTEMPTS) {
       const workerOutput = getFinalOutput(convertWorker.messages)
-      const prdContent = readFileSync(draftResult.data.prdPath, "utf-8").slice(0, 3000)
+      const prdContent = readFileSync(paths.prdMd, "utf-8").slice(0, 3000)
 
       ctx.ui.notify(`🔧 AI 正在诊断并修复转换问题...`, "warning")
 
@@ -1529,11 +1529,11 @@ async function handleStartNewTask(
         "## Conversion worker output:",
         workerOutput?.slice(-1000) || "(empty)",
         "",
-        `## Error: exitCode=${convertWorker.exitCode}, prd.json exists=${existsSync(prdPath)}`,
+        `## Error: exitCode=${convertWorker.exitCode}, prd.json exists=${existsSync(paths.prdJson)}`,
         "",
         "## Your task:",
-        "1. Read the PRD markdown at: " + draftResult.data.prdPath,
-        "2. Generate the correct prd.json in the current directory",
+        "1. Read the PRD markdown at: " + paths.prdMd,
+        `2. Generate the correct prd.json at: ${paths.prdJson}`,
         "3. The prd.json must have: project, branchName, description, userStories[]",
         "4. Each story needs: id, title, description, acceptanceCriteria[], priority, passes=false, notes=''",
         "5. Do NOT ask questions. Just fix the file.",
@@ -1546,8 +1546,8 @@ async function handleStartNewTask(
       fixStatus.finish(fixWorker.completed ? "completed" : "failed")
 
       // Check if fix created prd.json
-      if (existsSync(prdPath)) {
-        prd = readJsonFile(prdPath) as PrdJson | null
+      if (existsSync(paths.prdJson)) {
+        prd = readJsonFile(paths.prdJson) as PrdJson | null
         if (prd?.userStories && Array.isArray(prd.userStories)) {
           ctx.ui.notify("✅ AI 已自动修复 prd.json", "warning")
           break
@@ -1562,13 +1562,11 @@ async function handleStartNewTask(
     ctx.ui.notify([
       "❌ 转换失败，AI 也无法修复",
       "",
-      `PRD 草稿: ${draftResult.data.prdPath}`,
+      `PRD 草稿: ralph/${taskDirName}/prd.md`,
       "你可以手动编辑 PRD 后通过 /ralph → Continue PRD draft 继续",
     ].join("\n"), "error")
     return false
   }
-
-  clearDraftState(cwd)
 
   // ── Rich summary before starting execution ─────────────────────────
   const storyCount = prd.userStories.length
@@ -1587,6 +1585,8 @@ async function handleStartNewTask(
     understanding.slice(0, 200) + (understanding.length > 200 ? "..." : ""),
     "",
     `📝 AI 共问了 ${allAnswers.length} 个问题，需求已充分理解`,
+    "",
+    `📁 任务目录: ralph/${taskDirName}/`,
     "",
     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
     `🚀 执行计划: ${storyCount} 个用户故事`,
@@ -1607,67 +1607,120 @@ async function handleStartNewTask(
   // Let the TUI settle after the conversion worker's overlay was dismissed.
   await new Promise((r) => setTimeout(r, 300))
 
-  // [debug] trace confirm behavior
-  const _sigAborted = ctx.signal?.aborted ?? "no-signal"
-  ctx.ui.notify(`[debug] signal.aborted=${_sigAborted}, about to call confirm`, "warning")
-
   const confirmed = await ctx.ui.select(
     "确认开始执行？\n\n" + summaryLines.join("\n"),
     ["✅ 开始执行", "❌ 取消"],
     { signal: ctx.signal },
   )
 
-  ctx.ui.notify(`[debug] select returned: ${String(confirmed)}`, "warning")
-
   if (confirmed !== "✅ 开始执行") {
     ctx.ui.notify([
       "已取消。PRD 已保存，可通过 /ralph 继续。",
-      `文件: ${prdPath}`,
+      `目录: ralph/${taskDirName}/`,
     ].join("\n"), "warning")
     return true
   }
 
   // ── Start execution ────────────────────────────────────────────────
   await maybeOfferInitialPush(ctx, cwd)
-  await startLoop(ctx, prdPath, progressPath, storyCount)
+  await startLoop(ctx, paths, storyCount)
   return true
 }
 
 async function handleContinueDraft(
   ctx: ExtensionCommandContext,
-  prdPath: string,
-  progressPath: string,
+  paths: TaskPaths,
   draft: DraftState,
 ): Promise<boolean> {
   if (!(await ensureGitRepo(ctx))) return false
 
   const cwd = ctx.cwd
-  const draftAbsolutePath = resolveDraftPrdPath(cwd, draft.prdPath)
 
-  if (!existsSync(draftAbsolutePath)) {
-    const clearStaleDraft = await ctx.ui.confirm(
-      "Draft File Missing?",
+  if (!existsSync(paths.prdMd)) {
+    // PRD draft was never generated (or was deleted) — offer to regenerate
+    const choice = await ctx.ui.select(
+      "PRD 草稿缺失",
       [
-        `Draft file was not found: ${draft.prdPath}`,
+        `PRD 草稿文件未找到: ralph/${getTaskDirName(paths.taskDir)}/prd.md`,
         "",
-        "Clear the saved draft state so you can start over?",
+        `需求: ${draft.featureDescription}`,
+        `理解: ${draft.understanding.slice(0, 100)}...`,
+        `问答: ${draft.questionAnswers.length} 个问题已回答`,
+        "",
+        "已有完整的理解记录，可以重新生成 PRD 而不需要重新回答问题。",
       ].join("\n"),
+      ["重新生成 PRD", "清除此任务", "返回"],
       { signal: ctx.signal },
     )
-    if (clearStaleDraft) {
-      clearDraftState(cwd)
-      ctx.ui.notify("Cleared the missing PRD draft state.", "warning")
+
+    if (choice === "清除此任务") {
+      rmSync(paths.taskDir, { recursive: true, force: true })
+      ctx.ui.notify("已清除草稿任务目录。", "warning")
       return false
     }
-    return true
+
+    if (choice === "重新生成 PRD") {
+      // Regenerate PRD from saved understanding and answers
+      const allClarifications = formatDraftAnswers(draft.questionAnswers)
+      const draftPrompt = [
+        `Feature description: ${draft.featureDescription}`,
+        "",
+        "Ralph understanding:",
+        draft.understanding,
+        "",
+        "Clarifications:",
+        allClarifications,
+        "",
+        `Save the PRD draft to: ${paths.prdMd}`,
+      ].join("\n")
+
+      const regenResult = await runJsonSkillWorker<DraftGenerationResult>(
+        ctx,
+        "ralph-prd-draft",
+        draftPrompt,
+        `📝 重新生成 PRD...`,
+      )
+      if (!regenResult) {
+        ctx.ui.notify("❌ PRD 重新生成失败", "error")
+        return false
+      }
+
+      // If AI still wants to ask questions, handle them
+      if (regenResult.data.type === "questions") {
+        const qs = (regenResult.data as DraftQuestionsResult).questions
+        if (qs && qs.length > 0) {
+          const moreAnswers = await askClarifyingQuestions(ctx, qs)
+          if (moreAnswers) {
+            draft.questionAnswers.push(...moreAnswers)
+            writeDraftStateToTask(paths, draft)
+          }
+        }
+        ctx.ui.notify("AI 需要更多信息，请重新运行 /ralph 继续。", "warning")
+        return false
+      }
+
+      // Check if PRD was generated
+      if (!existsSync(paths.prdMd)) {
+        ctx.ui.notify("❌ PRD 重新生成失败 — 文件未创建", "error")
+        return false
+      }
+
+      ctx.ui.notify("✅ PRD 已重新生成", "warning")
+      // Fall through to the conversion step below
+    } else {
+      // "返回"
+      return false
+    }
   }
 
-  ctx.ui.notify(formatDraftSummary(draft), "info")
+  ctx.ui.notify(formatDraftSummary(draft, getTaskDirName(paths.taskDir)), "info")
 
   const readyToConvert = await ctx.ui.confirm(
     "Continue PRD Draft?",
     [
       formatDraftSummary(draft),
+      "",
+      `目录: ralph/${getTaskDirName(paths.taskDir)}/`,
       "",
       "Have you reviewed and updated this PRD draft file?",
       "Convert it to prd.json now?",
@@ -1679,7 +1732,7 @@ async function handleContinueDraft(
     ctx.ui.notify([
       "PRD draft is still waiting for your review.",
       "",
-      `Draft file: ${draft.prdPath}`,
+      `Draft file: ralph/${getTaskDirName(paths.taskDir)}/prd.md`,
       "Edit the markdown file, then run /ralph again and choose \"Continue PRD draft\".",
     ].join("\n"), "info")
     return true
@@ -1693,11 +1746,17 @@ async function handleContinueDraft(
   }
 
   const totalStartedAt = Date.now()
-  const status = startWorkerStatus(ctx, `Convert ${draft.prdPath}`, totalStartedAt)
-  const worker = await runWorker(cwd, `PRD file: ${draft.prdPath}`, converterSkillPath, ctx.signal, status.update)
-  status.finish(worker.exitCode === 0 && existsSync(prdPath) ? "completed" : "failed")
+  const status = startWorkerStatus(ctx, `Convert ralph/${getTaskDirName(paths.taskDir)}/prd.md`, totalStartedAt)
+  const worker = await runWorker(
+    cwd,
+    `PRD file: ${paths.prdMd}\n\nIMPORTANT: Save the generated prd.json to: ${paths.prdJson}`,
+    converterSkillPath,
+    ctx.signal,
+    status.update,
+  )
+  status.finish(worker.exitCode === 0 && existsSync(paths.prdJson) ? "completed" : "failed")
 
-  if (worker.exitCode !== 0 || !existsSync(prdPath)) {
+  if (worker.exitCode !== 0 || !existsSync(paths.prdJson)) {
     const output = getFinalOutput(worker.messages)
     ctx.ui.notify([
       "Failed to convert the reviewed PRD draft into prd.json.",
@@ -1708,13 +1767,12 @@ async function handleContinueDraft(
     return false
   }
 
-  const prd = readJsonFile(prdPath) as PrdJson | null
+  const prd = readJsonFile(paths.prdJson) as PrdJson | null
   if (!prd?.userStories || !Array.isArray(prd.userStories)) {
     ctx.ui.notify("prd.json was created but is invalid.", "error")
     return false
   }
 
-  clearDraftState(cwd)
   ctx.ui.notify([
     "Step 4/5: prd.json generated from the confirmed draft",
     "",
@@ -1744,135 +1802,88 @@ async function handleContinueDraft(
   ].join("\n"), "info")
 
   await maybeOfferInitialPush(ctx, cwd)
-  await startLoop(ctx, prdPath, progressPath, prd.userStories.length)
+  await startLoop(ctx, paths, prd.userStories.length)
   return true
 }
 
-async function handleRestoreHistoryEntry(
+async function handleViewTaskHistory(
   ctx: ExtensionCommandContext,
-  entry: HistoryEntry,
-  prdPath: string,
-  progressPath: string,
-  currentPrd: PrdJson | null,
 ): Promise<boolean> {
   const cwd = ctx.cwd
+  const taskDirs = listTaskDirs(cwd)
 
-  if (currentPrd?.userStories && Array.isArray(currentPrd.userStories)) {
-    const summary = getCurrentTaskSummary(currentPrd)
-    const shouldArchiveCurrent = await ctx.ui.confirm(
-      "Restore Archived Task?",
-      [
-        `Current task: ${currentPrd.description}`,
-        `Progress: ${summary.storiesCompleted}/${summary.storiesTotal} stories complete`,
-        "",
-        `Archive the current task, then restore archive/${entry.archiveDir}?`,
-      ].join("\n"),
-      { signal: ctx.signal },
-    )
-    if (!shouldArchiveCurrent) return false
-
-    const archivedCurrent = archiveCurrentRun(cwd, prdPath, progressPath, `replaced by restore from ${entry.archiveDir}`)
-    if (archivedCurrent) {
-      ctx.ui.notify(`Archived current task to archive/${archivedCurrent.archiveDir}.`, "info")
-    }
-  } else {
-    const shouldRestore = await ctx.ui.confirm(
-      "Restore Archived Task?",
-      `Restore archive/${entry.archiveDir} as the current Ralph task?`,
-      { signal: ctx.signal },
-    )
-    if (!shouldRestore) return false
+  if (taskDirs.length === 0) {
+    ctx.ui.notify("没有找到 Ralph 任务记录。", "info")
+    return false
   }
-
-  copyFileSync(getHistoryPrdPath(cwd, entry), prdPath)
-  const archivedProgressPath = getHistoryProgressPath(cwd, entry)
-  if (existsSync(archivedProgressPath)) {
-    copyFileSync(archivedProgressPath, progressPath)
-  } else {
-    writeFileSync(progressPath, `# Ralph Progress Log\nStarted: ${formatTimestamp()}\n---\n`, "utf-8")
-  }
-
-  ctx.ui.notify(`Restored archive/${entry.archiveDir} as the current Ralph task.`, "info")
-
-  const restoredPrd = readJsonFile(prdPath) as PrdJson | null
-  if (!restoredPrd?.userStories || !Array.isArray(restoredPrd.userStories)) return true
-
-  const resumeNow = await ctx.ui.confirm(
-    "Resume Restored Task?",
-    [
-      formatResumeSummary(restoredPrd),
-      "",
-      "Resume the restored task now?",
-    ].join("\n"),
-    { signal: ctx.signal },
-  )
-  if (!resumeNow) return true
-
-  await maybeOfferInitialPush(ctx, cwd)
-  await startLoop(ctx, prdPath, progressPath, restoredPrd.userStories.length)
-  return true
-}
-
-async function handleHistoryMenu(
-  ctx: ExtensionCommandContext,
-  prdPath: string,
-  progressPath: string,
-  currentPrd: PrdJson | null,
-): Promise<boolean> {
-  const cwd = ctx.cwd
 
   while (true) {
-    const historyEntries = getHistoryEntries(cwd)
-    if (historyEntries.length === 0) {
-      ctx.ui.notify("No archived Ralph tasks were found in archive/.", "info")
-      return false
-    }
+    // Build labels from task directories
+    const labels: string[] = taskDirs.map((dir) => {
+      const dirName = getTaskDirName(dir)
+      const slug = getTaskSlug(dirName)
+      const prd = readJsonFile(join(dir, "prd.json")) as PrdJson | null
+      const task = readJsonFile(join(dir, "task.json")) as Record<string, unknown> | null
 
-    const labels = historyEntries.map(formatHistoryOption)
-    const choice = await ctx.ui.select("Ralph History", [...labels, "Back"], { signal: ctx.signal })
-    if (!choice || choice === "Back") return false
+      if (prd?.userStories && Array.isArray(prd.userStories)) {
+        const done = prd.userStories.filter((s) => s.passes).length
+        const total = prd.userStories.length
+        const status = done === total ? "✅" : "⏳"
+        return `${status} ${dirName}  ${done}/${total}  ${prd.description}`
+      }
+      if (task) {
+        return `📝 ${dirName}  draft  ${(task.featureDescription as string)?.slice(0, 50) || ""}`
+      }
+      return `❓ ${dirName}`
+    })
+
+    const choice = await ctx.ui.select("Ralph 任务历史", [...labels, "返回"], { signal: ctx.signal })
+    if (!choice || choice === "返回") return false
 
     const index = labels.indexOf(choice)
     if (index === -1) return false
-    const entry = historyEntries[index]
-    const historyPrd = readJsonFile(getHistoryPrdPath(cwd, entry)) as PrdJson | null
+    const selectedDir = taskDirs[index]
+    const selectedPaths = makeTaskPaths(cwd, getTaskDirName(selectedDir))
+    const prd = readJsonFile(selectedPaths.prdJson) as PrdJson | null
+    const task = readJsonFile(selectedPaths.taskJson) as Record<string, unknown> | null
 
     while (true) {
-      const actions = [
-        "View summary",
-        "View progress log",
-        "Compare with current task",
-        "Restore as current task",
-        "Back",
-      ]
-      const action = await ctx.ui.select(`History: ${entry.description}`, actions, { signal: ctx.signal })
-      if (!action || action === "Back") break
+      const actions: string[] = ["查看摘要", "查看进度日志"]
+      if (prd?.userStories && Array.isArray(prd.userStories) && !allStoriesComplete(prd)) {
+        actions.push("设为当前任务")
+      }
+      actions.push("返回")
 
-      if (action === "View summary") {
-        ctx.ui.notify(formatHistorySummary(entry, historyPrd), "info")
+      const action = await ctx.ui.select(`${getTaskDirName(selectedDir)}`, actions, { signal: ctx.signal })
+      if (!action || action === "返回") break
+
+      if (action === "查看摘要") {
+        if (prd?.userStories && Array.isArray(prd.userStories)) {
+          ctx.ui.notify(formatStatus(prd), "info")
+        } else if (task) {
+          ctx.ui.notify([
+            `Feature: ${task.featureDescription}`,
+            `Understanding: ${task.understanding}`,
+          ].join("\n"), "info")
+        } else {
+          ctx.ui.notify("No task data found in this directory.", "warning")
+        }
         continue
       }
 
-      if (action === "View progress log") {
+      if (action === "查看进度日志") {
         ctx.ui.notify([
-          `archive/${entry.archiveDir}/progress.txt`,
+          `ralph/${getTaskDirName(selectedDir)}/progress.txt`,
           "",
-          getProgressTail(getHistoryProgressPath(cwd, entry)),
+          getProgressTail(selectedPaths.progress),
         ].join("\n"), "info")
         continue
       }
 
-      if (action === "Compare with current task") {
-        if (!currentPrd?.userStories || !Array.isArray(currentPrd.userStories)) {
-          ctx.ui.notify("No current task is active, so there is nothing to compare.", "warning")
-          continue
-        }
-        ctx.ui.notify(formatHistoryComparison(currentPrd, entry, historyPrd), "info")
-        continue
-      }
-
-      if (action === "Restore as current task") {
-        return await handleRestoreHistoryEntry(ctx, entry, prdPath, progressPath, currentPrd)
+      if (action === "设为当前任务") {
+        // Just return true — the caller will re-scan and find this as active
+        ctx.ui.notify(`已选择 ralph/${getTaskDirName(selectedDir)}/ 为当前任务。`, "info")
+        return true
       }
     }
   }
@@ -1945,18 +1956,17 @@ function formatCompletionSummary(prd: PrdJson, iterations: number, progressPath:
 
 async function startLoop(
   ctx: ExtensionCommandContext,
-  prdPath: string,
-  progressPath: string,
+  paths: TaskPaths,
   maxIterations: number,
 ): Promise<void> {
   const cwd = ctx.cwd
   const totalStartedAt = Date.now()
 
-  if (!existsSync(progressPath)) {
-    writeFileSync(progressPath, `# Ralph Progress Log\nStarted: ${formatTimestamp()}\n---\n`, "utf-8")
+  if (!existsSync(paths.progress)) {
+    writeFileSync(paths.progress, `# Ralph Progress Log\nStarted: ${formatTimestamp()}\n---\n`, "utf-8")
   }
 
-  const prd = readJsonFile(prdPath) as PrdJson | null
+  const prd = readJsonFile(paths.prdJson) as PrdJson | null
   if (!prd || !prd.userStories || !Array.isArray(prd.userStories)) {
     ctx.ui.notify("prd.json is invalid or has no userStories.", "error")
     return
@@ -1977,7 +1987,7 @@ async function startLoop(
   }
 
   for (let i = 1; i <= maxIterations; i++) {
-    const currentPrd = readJsonFile(prdPath) as PrdJson | null
+    const currentPrd = readJsonFile(paths.prdJson) as PrdJson | null
     if (!currentPrd) {
       ctx.ui.notify(`Iteration ${i}: prd.json disappeared, stopping.`, "error")
       return
@@ -1986,7 +1996,7 @@ async function startLoop(
     const nextStory = findNextStory(currentPrd)
     if (!nextStory || allStoriesComplete(currentPrd)) {
       const elapsed = Date.now() - totalStartedAt
-      ctx.ui.notify(formatCompletionSummary(currentPrd, i - 1, progressPath, elapsed), "info")
+      ctx.ui.notify(formatCompletionSummary(currentPrd, i - 1, paths.progress, elapsed), "info")
       return
     }
 
@@ -2005,8 +2015,8 @@ async function startLoop(
       "Acceptance Criteria:",
       ...nextStory.acceptanceCriteria.map((c) => `- ${c}`),
       "",
-      "After implementation, update prd.json to set passes: true for this story,",
-      "then append your progress to progress.txt.",
+      `After implementation, update ${paths.prdJson} to set passes: true for this story,`,
+      `then append your progress to ${paths.progress}.`,
     ].join("\n")
 
     const headBeforeIteration = getHeadSha(cwd)
@@ -2023,10 +2033,10 @@ async function startLoop(
     }
 
     if (worker.completed) {
-      const finalPrd = readJsonFile(prdPath) as PrdJson | null
+      const finalPrd = readJsonFile(paths.prdJson) as PrdJson | null
       if (finalPrd && allStoriesComplete(finalPrd)) {
         const elapsed = Date.now() - totalStartedAt
-        ctx.ui.notify(formatCompletionSummary(finalPrd, i, progressPath, elapsed), "info")
+        ctx.ui.notify(formatCompletionSummary(finalPrd, i, paths.progress, elapsed), "info")
         return
       }
     }
@@ -2036,10 +2046,10 @@ async function startLoop(
     }
   }
 
-  const finalPrd = readJsonFile(prdPath) as PrdJson | null
+  const finalPrd = readJsonFile(paths.prdJson) as PrdJson | null
   if (finalPrd) {
     const elapsed = Date.now() - totalStartedAt
-    ctx.ui.notify(formatCompletionSummary(finalPrd, maxIterations, progressPath, elapsed), "warning")
+    ctx.ui.notify(formatCompletionSummary(finalPrd, maxIterations, paths.progress, elapsed), "warning")
   } else {
     ctx.ui.notify(`Ralph reached max iterations (${maxIterations}). prd.json not found.`, "error")
   }
@@ -2067,8 +2077,6 @@ export default function (pi: ExtensionAPI) {
     description: "Ralph autonomous agent. Run /ralph to enter the interactive workflow.",
     handler: async (args, ctx) => {
       const cwd = ctx.cwd
-      const prdPath = join(cwd, "prd.json")
-      const progressPath = join(cwd, "progress.txt")
       const input = args.trim()
 
       ctx.ui.notify(`pi-ralph v${RALPH_PLUGIN_VERSION}`, "info")
@@ -2078,58 +2086,81 @@ export default function (pi: ExtensionAPI) {
         return
       }
 
+      // Backward-compat: migrate old-style files if they exist
+      migrateLegacyTask(cwd)
+
       while (true) {
-        const currentPrd = readJsonFile(prdPath) as PrdJson | null
-        const validCurrentPrd = currentPrd?.userStories && Array.isArray(currentPrd.userStories)
-          ? currentPrd
+        // Scan ralph/ directory for active tasks
+        const activePaths = findActiveTaskDir(cwd)
+        const activePrd = activePaths
+          ? readJsonFile(activePaths.prdJson) as PrdJson | null
           : null
-        const draftState = readDraftState(cwd)
-        const historyEntries = getHistoryEntries(cwd)
+        const validActivePrd = activePrd?.userStories && Array.isArray(activePrd.userStories)
+          ? activePrd
+          : null
 
-        if (currentPrd && !validCurrentPrd) {
-          ctx.ui.notify("Current prd.json exists but is invalid. Start a new task or restore from history.", "warning")
-        }
+        // Scan for draft tasks
+        const draftPaths = findDraftTaskDir(cwd)
+        const draftState = draftPaths
+          ? readDraftStateFromTask(draftPaths)
+          : null
 
-        ctx.ui.notify(formatHomeSummary(validCurrentPrd, draftState, historyEntries), "info")
+        // Scan for latest completed task (for congratulatory display)
+        const completedTask = !validActivePrd ? findLatestCompletedTask(cwd) : null
+
+        const allTaskDirs = listTaskDirs(cwd)
+
+        ctx.ui.notify(formatHomeSummary(
+          validActivePrd,
+          activePaths ? getTaskDirName(activePaths.taskDir) : null,
+          draftState,
+          draftPaths ? getTaskDirName(draftPaths.taskDir) : null,
+          completedTask?.prd ?? null,
+          completedTask ? getTaskDirName(completedTask.paths.taskDir) : null,
+          allTaskDirs.length,
+        ), "info")
 
         const menuOptions: string[] = []
-        if (validCurrentPrd && getCurrentTaskSummary(validCurrentPrd).storiesRemaining > 0) {
+        if (validActivePrd && activePaths && getCurrentTaskSummary(validActivePrd).storiesRemaining > 0) {
           menuOptions.push("Continue current task")
         }
-        if (draftState) {
+        if (draftState && draftPaths) {
           menuOptions.push("Continue PRD draft")
         }
         menuOptions.push("Start new task")
-        menuOptions.push("View history")
+        if (allTaskDirs.length > 0) {
+          menuOptions.push("View history")
+        }
         menuOptions.push("Exit")
 
         const choice = await ctx.ui.select("Ralph", menuOptions, { signal: ctx.signal })
         if (!choice || choice === "Exit") return
 
-        if (choice === "Continue current task" && validCurrentPrd) {
-          if (await handleResumeCurrentTask(ctx, prdPath, progressPath, validCurrentPrd)) {
+        if (choice === "Continue current task" && validActivePrd && activePaths) {
+          if (await handleResumeCurrentTask(ctx, activePaths, validActivePrd)) {
             return
           }
           continue
         }
 
-        if (choice === "Continue PRD draft" && draftState) {
-          if (await handleContinueDraft(ctx, prdPath, progressPath, draftState)) {
+        if (choice === "Continue PRD draft" && draftState && draftPaths) {
+          if (await handleContinueDraft(ctx, draftPaths, draftState)) {
             return
           }
           continue
         }
 
         if (choice === "Start new task") {
-          if (await handleStartNewTask(ctx, prdPath, progressPath, validCurrentPrd, draftState)) {
+          if (await handleStartNewTask(ctx, activePaths, validActivePrd, draftPaths, draftState)) {
             return
           }
           continue
         }
 
         if (choice === "View history") {
-          if (await handleHistoryMenu(ctx, prdPath, progressPath, validCurrentPrd)) {
-            return
+          if (await handleViewTaskHistory(ctx)) {
+            // User selected a task to resume — re-scan on next iteration
+            continue
           }
           continue
         }
