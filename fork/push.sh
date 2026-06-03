@@ -52,5 +52,21 @@ for repo in "${REPOS[@]}"; do
     echo -e "${GREEN}✓ $repo pushed${RESET}"
 done
 
+# Pushing main repository
+echo -e "\n${CYAN}Pushing main repository...${RESET}"
+cd "$SCRIPT_DIR/.."
+
+# Check for changes in the main repo
+if git diff --quiet && git diff --cached --quiet && [ -z "$(git ls-files --others --exclude-standard)" ]; then
+    echo -e "${DIM}Main repo: no changes to commit${RESET}"
+else
+    echo -e "${DIM}Main repo: committing changes...${RESET}"
+    git add -A
+    git commit -m "Auto-commit: $DATE"
+fi
+
+echo -e "${DIM}Pushing main repo to remote...${RESET}"
+git push origin main
+
 echo ""
 echo -e "${GREEN}${BOLD}Done!${RESET}"
