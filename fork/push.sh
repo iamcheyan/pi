@@ -11,13 +11,14 @@ DIM='\033[90m'
 RESET='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-DATE=$(date +%Y%m%d)
+DATE=$(date "+%Y-%m-%d %H:%M:%S")
 
 # Sub-repos to push (must match fork/ directories that are git repos)
 REPOS=(
     "pi-minimal"
     "pi-opencode-config-reader"
     "pi-ralph"
+    "pi-telegram"
     "ralph"
 )
 
