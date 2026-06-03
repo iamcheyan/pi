@@ -399,6 +399,21 @@ install_extensions() {
             ok "pi-debug skills → symlinked"
         fi
     fi
+
+    # --- pi-telegram (extension + bridge) ---
+    local PI_TELEGRAM_SRC="$SCRIPT_DIR/pi-telegram"
+
+    if [ -d "$PI_TELEGRAM_SRC" ]; then
+        ln -sfn "$PI_TELEGRAM_SRC/telegram-notify.ts" "$EXTENSIONS_DIR/telegram-notify.ts"
+        ok "pi-telegram → symlinked"
+
+        # Install dependencies for the bridge
+        if [ -f "$PI_TELEGRAM_SRC/package.json" ]; then
+            info "Installing dependencies for pi-telegram..."
+            (cd "$PI_TELEGRAM_SRC" && npm install --silent)
+            ok "pi-telegram dependencies installed"
+        fi
+    fi
 }
 
 # =============================================================================
