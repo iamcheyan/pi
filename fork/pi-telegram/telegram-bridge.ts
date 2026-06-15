@@ -95,18 +95,18 @@ class StreamSender {
   private mode: "draft" | "edit" | "detecting" = "detecting";
   private messageId: number | null = null;
   private lastText = "";
-  
+
   constructor(chatId: number, bot: Bot) {
     this.chatId = chatId;
     this.bot = bot;
   }
-  
+
   async sendUpdate(text: string) {
     if (!text.trim()) return;
     this.lastText = text;
-    
+
     const formattedText = markdownToHtml(text);
-    
+
     if (this.mode === "detecting") {
       try {
         // Try calling sendMessageDraft
@@ -127,7 +127,7 @@ class StreamSender {
         return;
       }
     }
-    
+
     if (this.mode === "draft") {
       try {
         await this.bot.api.raw.makeRequest("sendMessageDraft", {
@@ -150,10 +150,10 @@ class StreamSender {
       }
     }
   }
-  
+
   async finalize(text: string) {
     const chunks = splitMessage(text || this.lastText || "(no response)", 4096);
-    
+
     if (this.mode === "draft") {
       for (const chunk of chunks) {
         const formatted = markdownToHtml(chunk);
@@ -173,7 +173,7 @@ class StreamSender {
           }
         }
       }
-      
+
       // Send remaining chunks as new messages
       for (let i = 1; i < chunks.length; i++) {
         const formatted = markdownToHtml(chunks[i]);
@@ -258,12 +258,12 @@ class PiRpcClient {
     if (!this.onStreamUpdate) return;
     const now = Date.now();
     const elapsed = now - this.lastStreamTime;
-    
+
     if (this.streamTimeout) {
       clearTimeout(this.streamTimeout);
       this.streamTimeout = null;
     }
-    
+
     if (elapsed >= 800) {
       this.lastStreamTime = now;
       this.onStreamUpdate(text);
@@ -410,7 +410,7 @@ class PiRpcClient {
     if (this.isProcessing || this.queue.length === 0) return;
     this.isProcessing = true;
     const { message, chatId } = this.queue.shift()!;
-    
+
     const sender = this.bot ? new StreamSender(chatId, this.bot) : null;
     if (sender) {
       this.onStreamUpdate = (text) => {
@@ -418,7 +418,7 @@ class PiRpcClient {
         sender.sendUpdate(filtered).catch(() => {});
       };
     }
-    
+
     try {
       const response = await this.sendPrompt(message);
       this.stopTyping();
@@ -549,13 +549,13 @@ function markdownToHtml(text: string): string {
           code = block.slice(firstNewLine + 1);
         }
       }
-      
+
       // Escape HTML special characters inside code block
       const escapedCode = code
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;");
-        
+
       if (lang) {
         processedParts.push(`<pre><code class="language-${lang}">${escapedCode}</code></pre>`);
       } else {

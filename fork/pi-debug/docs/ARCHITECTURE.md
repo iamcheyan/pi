@@ -69,7 +69,7 @@ class PendingMessageQueue {
       this.messages.push(message);
     }
   }
-  
+
   drain(): AgentMessage[] {
     const drained = this.messages.slice();
     this.messages = [];
