@@ -259,9 +259,9 @@ function getSessionStats(config: TelegramConfig): string {
   const home = process.env.HOME ?? "~";
   const sessionsDir = resolve(home, ".pi", "agent", "sessions", "telegram");
   const activeSessionPath = resolve(sessionsDir, `chat-${config.chatId}.jsonl`);
-  
+
   const lines: string[] = ["=== Sessions Information ==="];
-  
+
   if (existsSync(activeSessionPath)) {
     try {
       const stats = statSync(activeSessionPath);
@@ -277,7 +277,7 @@ function getSessionStats(config: TelegramConfig): string {
   } else {
     lines.push(`Active Session: None (chat-${config.chatId}.jsonl does not exist yet)`);
   }
-  
+
   // List backups
   try {
     if (existsSync(sessionsDir)) {
@@ -299,7 +299,7 @@ function getSessionStats(config: TelegramConfig): string {
   } catch (e) {
     lines.push(`\nFailed to list backups: ${e instanceof Error ? e.message : String(e)}`);
   }
-  
+
   return lines.join("\n");
 }
 
@@ -331,7 +331,7 @@ async function setupWizard(ctx: any, pi: ExtensionAPI): Promise<TelegramConfig |
     "  打开 Telegram，搜索 @BotFather，发送 /newbot",
     "  按提示创建机器人后，复制收到的 Token"
   ].join("\n");
-  
+
   ctx.ui.notify(bannerText, "info");
 
   const botToken = await ctx.ui.input("输入 Bot Token", "例如: 123456:ABC-DEF...");

@@ -44,7 +44,7 @@ load_nvm() {
 # ─── nvm: load Bun ───────────────────────────────────────────────────────────
 load_bun() {
   load_nvm
-  
+
   if command -v bun &>/dev/null; then
     echo -e "${DIM}bun $(bun --version) found in PATH${RESET}"
     return
@@ -87,10 +87,10 @@ detect_platform() {
 # ─── Build dependencies ──────────────────────────────────────────────────────
 build_deps() {
   echo -e "${DIM}Building dependencies...${RESET}"
-  
+
   cd "$ROOT_DIR"
   npm install --ignore-scripts
-  
+
   # Build packages in order: tui -> ai -> agent -> coding-agent
   echo -e "${DIM}Building packages...${RESET}"
   npm run build
@@ -102,21 +102,21 @@ build_binary() {
   # Prefer the clean version from package.json to avoid prerelease suffixes
   # (git describe produces e.g. 0.76.0-24-ge658bb04 which looks older than 0.76.0)
   version="$(cd "$ROOT_DIR" && node -e "console.log(JSON.parse(require('fs').readFileSync('packages/coding-agent/package.json','utf-8')).version || '0.0.0-dev')" 2>/dev/null || echo '0.0.0-dev')"
-  
+
   local channel
   channel="$(cd "$ROOT_DIR" && git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "local")"
-  
+
   local package_dir="pi-${PLATFORM_OS}-${PLATFORM_ARCH}"
   local out_dir="$ROOT_DIR/fork/dist/$package_dir"
   local out_bin="$out_dir/bin/pi"
-  
+
   rm -rf "$out_dir"
   mkdir -p "$out_dir/bin"
-  
+
   echo -e "${DIM}Compiling pi binary for current platform...${RESET}"
-  
+
   cd "$CODING_AGENT_DIR"
-  
+
   # Build using bun compile
   BUILD_TARGET="bun-${PLATFORM_OS}-${PLATFORM_ARCH}" \
   BUILD_OUTFILE="$out_bin" \
@@ -126,7 +126,7 @@ build_binary() {
     ./dist/bun/cli.js \
     ./src/utils/image-resize-worker.ts \
     --outfile "$out_bin"
-  
+
   # Create package.json in both locations (root and bin)
   cat > "$out_dir/package.json" <<EOF
 {
@@ -136,18 +136,18 @@ build_binary() {
 }
 EOF
   cp "$out_dir/package.json" "$out_dir/bin/package.json"
-  
+
   # Copy assets to bin directory (where binary expects them)
   mkdir -p "$out_dir/bin/theme"
   cp src/modes/interactive/theme/*.json "$out_dir/bin/theme/" 2>/dev/null || true
   mkdir -p "$out_dir/bin/assets"
   cp src/modes/interactive/assets/*.png "$out_dir/bin/assets/" 2>/dev/null || true
-  
+
   # Copy docs and examples to root
   cp -r dist/docs "$out_dir/" 2>/dev/null || true
   cp -r dist/examples "$out_dir/" 2>/dev/null || true
   cp dist/CHANGELOG.md "$out_dir/" 2>/dev/null || true
-  
+
   echo -e "${GREEN}Binary built: $out_bin${RESET}"
 }
 
@@ -169,18 +169,18 @@ smoke_test() {
 main() {
   echo -e "${BOLD}${CYAN}Building pi binaries${RESET}"
   echo ""
-  
+
   load_bun
   detect_platform
   build_deps
   build_binary
-  
+
   local package_dir="pi-${PLATFORM_OS}-${PLATFORM_ARCH}"
   local out_bin="$ROOT_DIR/fork/dist/$package_dir/bin/pi"
-  
+
   echo -e "${DIM}Running smoke test...${RESET}"
   smoke_test "$out_bin"
-  
+
   echo ""
   echo -e "${GREEN}${BOLD}Build complete!${RESET}"
   echo ""
