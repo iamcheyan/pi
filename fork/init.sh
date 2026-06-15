@@ -290,11 +290,26 @@ install_extensions() {
         local repo_url="$2"
         local name="$3"
 
-        # If directory exists but is empty (git pull didn't fetch sub-repos)
-        if [ -d "$dir" ] && [ -z "$(ls -A "$dir" 2>/dev/null)" ]; then
+        if [ -d "$dir/.git" ]; then
+            info "Sub-repo $name exists, pulling..."
+            if git -C "$dir" pull --ff-only 2>/dev/null; then
+                ok "Updated $name"
+            else
+                warn "Failed to update $name (using existing version)"
+            fi
+        elif [ -d "$dir" ] && [ -z "$(ls -A "$dir" 2>/dev/null)" ]; then
+            # Directory exists but empty (incomplete clone)
             info "Sub-repo $name is empty, cloning..."
-            if git clone --depth 1 "$repo_url" "$dir" 2>/dev/null; then
-                ok "Cloned $name into $dir"
+            if git clone --depth 1 "$repo_url" "$dir"; then
+                ok "Cloned $name"
+            else
+                warn "Failed to clone $name"
+                return 1
+            fi
+        else
+            info "Sub-repo $name not found, cloning..."
+            if git clone --depth 1 "$repo_url" "$dir"; then
+                ok "Cloned $name"
             else
                 warn "Failed to clone $name"
                 return 1
