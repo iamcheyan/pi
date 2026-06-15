@@ -2642,7 +2642,8 @@ export class InteractiveMode {
 				await this.handleReloadCommand();
 				return;
 			}
-			if (text === "/debug") {
+			// FORK-SEAM(pi): let an installed extension own /debug when present.
+			if (text === "/debug" && !this.session.extensionRunner.getCommand("debug")) {
 				this.handleDebugCommand();
 				this.editor.setText("");
 				return;
