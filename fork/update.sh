@@ -296,6 +296,16 @@ if [ -n "$UNMERGED" ]; then
       echo -e "  ${GREEN}✓${RESET} kept fork $f"
     done
   fi
+
+  # Remove files we deleted but upstream modified (DU conflicts)
+  # These are files fork intentionally doesn't need
+  DELETE_CONFLICTS=$(echo "$UNMERGED" | grep -vE "^\.github/" | grep -vE "^(AGENTS\.md|README\.md)$" || true)
+  if [ -n "$DELETE_CONFLICTS" ]; then
+    echo -e "${YELLOW}Auto-resolving deleted-file conflicts (keeping our deletion)...${RESET}"
+    echo "$DELETE_CONFLICTS" | while IFS= read -r f; do
+      git rm -f "$f" 2>/dev/null && echo -e "  ${GREEN}✓${RESET} removed $f"
+    done
+  fi
 fi
 
 # Check remaining conflicts (after auto-resolving .github/)
