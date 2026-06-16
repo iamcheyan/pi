@@ -157,11 +157,26 @@ smoke_test() {
 
   if "$entrypoint" --version &>/dev/null; then
     echo -e "${GREEN}Smoke test passed${RESET}"
-    echo ""
-    echo -e "${DIM}Starting pi...${RESET}"
-    exec "$entrypoint"
   else
     echo -e "${YELLOW}Warning: smoke test failed${RESET}"
+    return 1
+  fi
+}
+
+# ─── Package updates ─────────────────────────────────────────────────────────
+update_packages() {
+  local entrypoint="$1"
+
+  if [ "${PI_BUILD_SKIP_PACKAGE_UPDATE:-}" = "1" ]; then
+    echo -e "${DIM}Skipping package update check (PI_BUILD_SKIP_PACKAGE_UPDATE=1).${RESET}"
+    return
+  fi
+
+  echo -e "${DIM}Checking package updates...${RESET}"
+  if "$entrypoint" update --extensions; then
+    echo -e "${GREEN}Package update check complete${RESET}"
+  else
+    echo -e "${YELLOW}Warning: package update check failed${RESET}"
   fi
 }
 
@@ -180,6 +195,11 @@ main() {
 
   echo -e "${DIM}Running smoke test...${RESET}"
   smoke_test "$out_bin"
+  update_packages "$out_bin"
+
+  echo ""
+  echo -e "${DIM}Starting pi...${RESET}"
+  exec "$out_bin"
 
   echo ""
   echo -e "${GREEN}${BOLD}Build complete!${RESET}"
