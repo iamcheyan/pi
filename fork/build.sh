@@ -195,6 +195,15 @@ main() {
 
   echo -e "${DIM}Running smoke test...${RESET}"
   smoke_test "$out_bin"
+
+  if [ "${PI_BUILD_NO_START:-}" = "1" ]; then
+    echo ""
+    echo -e "${GREEN}${BOLD}Build complete!${RESET}"
+    echo ""
+    echo -e "  Binary: ${CYAN}$out_bin${RESET}"
+    return
+  fi
+
   update_packages "$out_bin"
 
   echo ""

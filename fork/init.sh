@@ -39,7 +39,7 @@ UPSTREAM_API="https://api.github.com/repos/$UPSTREAM_REPO"
 # Detect mode: local (inside pi repo) or remote (standalone)
 # =============================================================================
 IS_LOCAL=false
-if [ -d "$REPO_DIR/.git" ] && [ -f "$REPO_DIR/package.json" ]; then
+if git -C "$REPO_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 && [ -f "$REPO_DIR/package.json" ]; then
     IS_LOCAL=true
 fi
 
@@ -131,7 +131,7 @@ resolve_pi_bin() {
         warn "No compiled pi binary found, attempting to build..."
         if [ -f "$REPO_DIR/fork/build.sh" ]; then
             echo ""
-            if bash "$REPO_DIR/fork/build.sh"; then
+            if PI_BUILD_NO_START=1 PI_BUILD_SKIP_PACKAGE_UPDATE=1 bash "$REPO_DIR/fork/build.sh"; then
                 # Re-resolve after build
                 PI_BIN=$(find "$REPO_DIR/fork/dist/" -path "*/bin/pi" -type f -executable 2>/dev/null | head -1)
                 if [ -n "$PI_BIN" ]; then
@@ -276,6 +276,19 @@ process.stdin.on('end', () => {
 # =============================================================================
 # Install extensions
 # =============================================================================
+sync_submodules() {
+    if [ "$IS_LOCAL" != true ] || [ ! -f "$REPO_DIR/.gitmodules" ]; then
+        return
+    fi
+
+    section "Initializing submodules..."
+    if git -C "$REPO_DIR" submodule update --init --recursive; then
+        ok "submodules initialized"
+    else
+        warn "Failed to initialize submodules; bundled fallback paths will be used where available"
+    fi
+}
+
 install_extensions() {
     section "Installing extensions..."
 
@@ -290,12 +303,16 @@ install_extensions() {
         local repo_url="$2"
         local name="$3"
 
-        if [ -e "$dir/.git" ]; then
-            info "Sub-repo $name exists, pulling..."
-            if git -C "$dir" pull --ff-only 2>/dev/null; then
-                ok "Updated $name"
+        if git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+            if [ -n "$(git -C "$dir" rev-parse --show-superproject-working-tree 2>/dev/null || true)" ]; then
+                info "Using submodule $name"
             else
-                warn "Failed to update $name (using existing version)"
+                info "Sub-repo $name exists, pulling..."
+                if git -C "$dir" pull --ff-only 2>/dev/null; then
+                    ok "Updated $name"
+                else
+                    warn "Failed to update $name (using existing version)"
+                fi
             fi
         elif [ -d "$dir" ] && [ -n "$(ls -A "$dir" 2>/dev/null)" ]; then
             info "Using bundled $name"
@@ -436,50 +453,55 @@ setup_pi_wrapper() {
         # Local mode: wrapper auto-detects repo binary
         local WRAPPER="$WRAPPER_DIR/pi"
 
-        if [ -f "$WRAPPER" ] && grep -q "PI_BIN_PATH" "$WRAPPER" 2>/dev/null; then
-            info "wrapper already exists, skipping"
-        else
-            mkdir -p "$WRAPPER_DIR"
-            cat > "$WRAPPER" << 'WRAPPER_EOF'
+        mkdir -p "$WRAPPER_DIR"
+        cat > "$WRAPPER" << WRAPPER_EOF
 #!/bin/bash
 # Resolve pi binary: use PI_REPO env var, or auto-detect
+DEFAULT_PI_REPO="$REPO_DIR"
 PI_BIN_PATH=""
 
 find_pi() {
-    local root="$1"
-    [ -d "$root/.git" ] || return 1
+    local root="\$1"
+    [ -d "\$root/.git" ] || [ -f "\$root/.git" ] || return 1
     local path
-    path=$(find "$root/fork/dist/" -path "*/bin/pi" -type f 2>/dev/null | head -1)
-    [ -n "$path" ] && [ -x "$path" ] && echo "$path"
+    path=\$(find "\$root/fork/dist/" -path "*/bin/pi" -type f 2>/dev/null | head -1)
+    [ -n "\$path" ] && [ -x "\$path" ] && echo "\$path"
 }
 
-if [ -n "${PI_REPO:-}" ]; then
-    PI_BIN_PATH=$(find_pi "$PI_REPO" 2>/dev/null || true)
+if [ -n "\${PI_REPO:-}" ]; then
+    PI_BIN_PATH=\$(find_pi "\$PI_REPO" 2>/dev/null || true)
 fi
 
-if [ -z "$PI_BIN_PATH" ]; then
+if [ -z "\$PI_BIN_PATH" ]; then
+    PI_BIN_PATH=\$(find_pi "\$DEFAULT_PI_REPO" 2>/dev/null || true)
+fi
+
+if [ -z "\$PI_BIN_PATH" ]; then
     # Search common locations (case-insensitive for macOS/Linux)
-    for candidate in "$HOME/Development/pi" "$HOME/development/pi" "$HOME/pi" "$HOME/repos/pi"; do
-        PI_BIN_PATH=$(find_pi "$candidate" 2>/dev/null || true)
-        [ -n "$PI_BIN_PATH" ] && break
+    for candidate in "\$HOME/Development/pi" "\$HOME/development/pi" "\$HOME/Development/PI" "\$HOME/development/PI" "\$HOME/pi" "\$HOME/repos/pi"; do
+        PI_BIN_PATH=\$(find_pi "\$candidate" 2>/dev/null || true)
+        [ -n "\$PI_BIN_PATH" ] && break
     done
 fi
 
 # Fallback to system pi
-if [ -z "$PI_BIN_PATH" ]; then
-    PI_BIN_PATH=$(command -v pi 2>/dev/null || true)
+if [ -z "\$PI_BIN_PATH" ]; then
+    SELF_PATH="\$(cd "\$(dirname "\$0")" && pwd)/\$(basename "\$0")"
+    CANDIDATE=\$(command -v pi 2>/dev/null || true)
+    if [ -n "\$CANDIDATE" ] && [ "\$CANDIDATE" != "\$SELF_PATH" ]; then
+        PI_BIN_PATH="\$CANDIDATE"
+    fi
 fi
 
-if [ -z "$PI_BIN_PATH" ]; then
+if [ -z "\$PI_BIN_PATH" ]; then
     echo "Error: cannot find pi binary. Set PI_REPO or build first." >&2
     exit 1
 fi
 
-exec "$PI_BIN_PATH" "$@"
+exec "\$PI_BIN_PATH" "\$@"
 WRAPPER_EOF
-            chmod +x "$WRAPPER"
-            ok "created $WRAPPER"
-        fi
+        chmod +x "$WRAPPER"
+        ok "refreshed $WRAPPER"
     else
         # Remote mode: binary is already at ~/.pi/bin/pi
         ok "pi binary at ~/.pi/bin/pi"
@@ -497,7 +519,7 @@ WRAPPER_EOF
     # Hint about PI_REPO (local mode only)
     if [ "$IS_LOCAL" = true ] && [ -z "${PI_REPO:-}" ]; then
         echo ""
-        info "Tip: export PI_REPO=\"\$HOME/Development/pi\" in ~/.zshrc"
+        info "Tip: export PI_REPO=\"$REPO_DIR\" in ~/.zshrc"
         info "    to avoid auto-detection overhead on startup."
     fi
 }
@@ -719,14 +741,17 @@ main() {
         warn "pi binary not found — some steps will be skipped"
     fi
 
+    # Clean up old files
+    cleanup_old
+
+    # Initialize submodules
+    sync_submodules
+
     # Install extensions
     install_extensions
 
     # Setup PATH wrapper
     setup_pi_wrapper
-
-    # Clean up old files
-    cleanup_old
 
     # Install npm packages
     install_pi_packages
