@@ -989,21 +989,12 @@ function setWorkerUiStatus(
   ctx.ui.setWidget("ralph-progress", undefined)
 
   if (phase === "running") {
-    if (!busyEditorMounted) {
-      ctx.ui.setEditorText("")
-      ctx.ui.setEditorComponent((tui, theme, keybindings) => new RalphBusyEditor(tui, theme, keybindings))
-      busyEditorMounted = true
-    }
     ctx.ui.setWorkingVisible(true)
     ctx.ui.setWorkingMessage(text)
     ctx.ui.setWorkingIndicator({ frames: [...WORKER_SPINNER_FRAMES], intervalMs: 120 })
   } else {
     ctx.ui.setWorkingVisible(false)
     ctx.ui.setWorkingMessage()
-    if (busyEditorMounted) {
-      ctx.ui.setEditorComponent(undefined)
-      busyEditorMounted = false
-    }
   }
 }
 
@@ -2066,7 +2057,6 @@ export default function (pi: ExtensionAPI) {
     busyEditorMounted = false
     ctx.ui.setWidget("ralph-progress", undefined)
     ctx.ui.setStatus("ralph", undefined)
-    ctx.ui.setEditorComponent(undefined)
   })
 
   // Auto-install skills on first load
