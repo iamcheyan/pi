@@ -2,10 +2,14 @@
 set -euo pipefail
 
 # 1. Install official pi-coding-agent
-echo "Installing official @earendil-works/pi-coding-agent globally..."
-if ! npm install -g @earendil-works/pi-coding-agent; then
-    echo "Permission denied. Retrying with sudo..."
+echo "Checking global npm directory permissions..."
+GLOBAL_ROOT=$(npm root -g)
+if [ ! -w "$GLOBAL_ROOT" ] || [ ! -w "$(dirname "$GLOBAL_ROOT")" ]; then
+    echo "Global npm directory ($GLOBAL_ROOT) is not writable. Installing with sudo..."
     sudo npm install -g @earendil-works/pi-coding-agent
+else
+    echo "Installing official @earendil-works/pi-coding-agent globally..."
+    npm install -g @earendil-works/pi-coding-agent
 fi
 
 # Resolve the real user's HOME directory even if run under sudo
