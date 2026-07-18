@@ -3,7 +3,10 @@ set -euo pipefail
 
 # 1. Install official pi-coding-agent
 echo "Installing official @earendil-works/pi-coding-agent globally..."
-npm install -g @earendil-works/pi-coding-agent
+if ! npm install -g @earendil-works/pi-coding-agent; then
+    echo "Permission denied. Retrying with sudo..."
+    sudo npm install -g @earendil-works/pi-coding-agent
+fi
 
 # 2. Recreate extension directory
 EXT_DIR="$HOME/.pi/agent/extensions"
