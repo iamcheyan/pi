@@ -4,3 +4,9 @@
 [submodule "fork/pi-opencode-config-reader"]
 	path = plugins/pi-opencode-config-reader
 	url = https://github.com/iamcheyan/pi-opencode-config-reader.git
+[submodule "plugins/pi-ralph"]
+	path = plugins/pi-ralph
+	url = https://github.com/iamcheyan/pi-ralph.git
+[submodule "plugins/pi-telegram"]
+	path = plugins/pi-telegram
+	url = https://github.com/iamcheyan/pi-telegram.git
