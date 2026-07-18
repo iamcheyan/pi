@@ -50,6 +50,11 @@ link_plugin "$REPO_DIR/plugins/pi-ralph/index.ts" "$EXT_DIR/pi-ralph.ts"
 link_plugin "$REPO_DIR/plugins/pi-spawn/index.ts" "$EXT_DIR/pi-spawn.ts"
 link_plugin "$REPO_DIR/plugins/pi-telegram/telegram-notify.ts" "$EXT_DIR/telegram-notify.ts"
 
+# 3.5. Link the custom themes
+THEMES_DIR="$REAL_HOME/.pi/agent/themes"
+mkdir -p "$THEMES_DIR"
+link_plugin "$REPO_DIR/plugins/pi-minimal/themes/minimal.json" "$THEMES_DIR/minimal.json"
+
 # 4. Update the wrapper script to run global pi
 WRAPPER_PATH="$REAL_HOME/.pi/bin/pi"
 if [ -f "$WRAPPER_PATH" ]; then
