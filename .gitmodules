@@ -1,6 +1,6 @@
 [submodule "fork/pi-minimal"]
-	path = fork/pi-minimal
+	path = plugins/pi-minimal
 	url = https://github.com/iamcheyan/pi-minimal.git
 [submodule "fork/pi-opencode-config-reader"]
-	path = fork/pi-opencode-config-reader
+	path = plugins/pi-opencode-config-reader
 	url = https://github.com/iamcheyan/pi-opencode-config-reader.git
