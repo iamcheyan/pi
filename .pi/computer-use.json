@@ -1,0 +1,5 @@
+{
+  "browser_use": true,
+  "headless": false,
+  "cursor_overlay": true
+}
