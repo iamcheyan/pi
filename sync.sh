@@ -1,22 +1,65 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 1. Install official pi-coding-agent
-echo "Checking global npm directory permissions..."
-GLOBAL_ROOT=$(npm root -g)
-if [ ! -w "$GLOBAL_ROOT" ] || [ ! -w "$(dirname "$GLOBAL_ROOT")" ]; then
-    echo "Global npm directory ($GLOBAL_ROOT) is not writable. Installing with sudo..."
-    sudo npm install -g @earendil-works/pi-coding-agent
-else
-    echo "Installing official @earendil-works/pi-coding-agent globally..."
-    npm install -g @earendil-works/pi-coding-agent
-fi
-
 # Resolve the real user's HOME directory even if run under sudo
 REAL_HOME="${HOME}"
 if [ -n "${SUDO_USER:-}" ]; then
     REAL_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6)
 fi
+
+# ---------------------------------------------------------------------------
+# 0. Ensure a user-local npm prefix so we never need sudo and never collide
+#    with a stale system install under /usr/lib/node_modules.
+# ---------------------------------------------------------------------------
+NPM_GLOBAL="$REAL_HOME/.npm-global"
+mkdir -p "$NPM_GLOBAL"
+npm config set prefix "$NPM_GLOBAL"
+export PATH="$NPM_GLOBAL/bin:$PATH"
+
+# ---------------------------------------------------------------------------
+# 1. Ensure Node >= 22 via fnm (user-local, no sudo). pi-coding-agent@latest
+#    requires Node 22; on Node 20 npm resolves the "legacy-node20" dist-tag
+#    (0.74.x) which lacks the pi-ai/compat export that pi-subagents needs.
+# ---------------------------------------------------------------------------
+ensure_node_22() {
+    local fnm_dir="$REAL_HOME/.fnm"
+    local fnm_bin="$fnm_dir/fnm"
+    if [ ! -x "$fnm_bin" ] && [ -x "$fnm_dir/bin/fnm" ]; then
+        fnm_bin="$fnm_dir/bin/fnm"
+    fi
+    if [ ! -x "$fnm_bin" ]; then
+        echo "fnm not found; installing fnm to $fnm_dir ..."
+        curl -fsSL https://fnm.vercel.app/install | FNM_DIR="$fnm_dir" bash
+        # The installer places the binary at $fnm_dir/fnm on Linux.
+        [ -x "$fnm_dir/fnm" ] && fnm_bin="$fnm_dir/fnm"
+    fi
+    if [ -x "$fnm_bin" ]; then
+        export FNM_DIR="$fnm_dir"
+        export PATH="$fnm_dir:$PATH"
+        eval "$("$fnm_bin" env --shell bash)"
+        local major
+        major="$(node --version 2>/dev/null | sed 's/^v//' | cut -d. -f1 || echo 0)"
+        if [ "${major:-0}" -lt 22 ]; then
+            echo "Node $(node --version 2>/dev/null || echo 'missing') < 22; installing Node 22 via fnm..."
+            "$fnm_bin" install 22
+            "$fnm_bin" use 22
+            "$fnm_bin" default 22
+        fi
+        eval "$("$fnm_bin" env --shell bash)"
+        echo "Using Node $(node --version) at $(command -v node)"
+    else
+        echo "Warning: fnm unavailable; relying on system node ($(node --version 2>/dev/null || echo 'missing')). pi-coding-agent@latest may not install."
+    fi
+}
+ensure_node_22
+
+# ---------------------------------------------------------------------------
+# 2. Install official pi-coding-agent (latest) + pi-subagents into the
+#    user-local prefix. @latest is explicit so npm never falls back to the
+#    "legacy-node20" dist-tag.
+# ---------------------------------------------------------------------------
+echo "Installing @earendil-works/pi-coding-agent@latest and pi-subagents@latest..."
+npm install -g @earendil-works/pi-coding-agent@latest pi-subagents@latest
 
 # Recreate extension and theme directories
 EXT_DIR="$REAL_HOME/.pi/agent/extensions"
@@ -148,18 +191,50 @@ echo "Cleaning up any uninstalled plugin links..."
 cleanup_stale_symlinks "$EXT_DIR"
 cleanup_stale_symlinks "$THEMES_DIR"
 
-# 4. Update the wrapper script to run global pi
-WRAPPER_PATH="$REAL_HOME/.pi/bin/pi"
-if [ -f "$WRAPPER_PATH" ]; then
-    echo "Updating wrapper script at $WRAPPER_PATH..."
-    cat > "$WRAPPER_PATH" <<'EOF'
+# 4. Update the wrapper script to run the user-installed pi under fnm's
+#    Node 22. Calling bare `pi` would resolve to a stale system install at
+#    /usr/bin/pi (Node 20); the wrapper instead points at $NPM_GLOBAL/bin/pi
+#    and activates fnm by direct path so it works even when fnm is not on
+#    the caller's PATH (e.g. non-interactive shells, cron).
+WRAPPER_DIR="$REAL_HOME/.pi/bin"
+WRAPPER_PATH="$WRAPPER_DIR/pi"
+FNM_DIR="$REAL_HOME/.fnm"
+mkdir -p "$WRAPPER_DIR"
+echo "Updating wrapper script at $WRAPPER_PATH..."
+cat > "$WRAPPER_PATH" <<EOF
 #!/bin/bash
-exec pi "$@"
-EOF
-    chmod +x "$WRAPPER_PATH"
-    if [ -n "${SUDO_USER:-}" ]; then
-        chown "$SUDO_USER:" "$WRAPPER_PATH"
-    fi
+# Wrapper that runs the user-installed pi-coding-agent from $NPM_GLOBAL
+# under fnm's Node 22, avoiding the system Node 20 at /usr/bin/node which
+# lacks APIs the latest pi-coding-agent needs.
+
+export FNM_DIR="\${FNM_DIR:-$FNM_DIR}"
+FNM_BIN="\$FNM_DIR/fnm"
+if [ ! -x "\$FNM_BIN" ] && [ -x "\$FNM_DIR/bin/fnm" ]; then
+    FNM_BIN="\$FNM_DIR/bin/fnm"
 fi
+if [ -x "\$FNM_BIN" ]; then
+    eval "\$("\$FNM_BIN" env --shell bash)"
+fi
+
+exec "$NPM_GLOBAL/bin/pi" "\$@"
+EOF
+chmod +x "$WRAPPER_PATH"
+if [ -n "${SUDO_USER:-}" ]; then
+    chown "$SUDO_USER:" "$WRAPPER_PATH"
+fi
+
+# 5. Ensure the wrapper dir is on PATH for the current shell; hint to the
+#    user if their shell rc hasn't been updated yet.
+case ":${PATH}:" in
+    *":$WRAPPER_DIR:"*) : ;;
+    *)
+        export PATH="$WRAPPER_DIR:$PATH"
+        echo
+        echo "NOTE: '$WRAPPER_DIR' is not on your PATH."
+        echo "Add this line to your shell rc (~/.zshrc or ~/.bashrc):"
+        echo "    export PATH=\"$WRAPPER_DIR:\$PATH\""
+        echo
+        ;;
+esac
 
 echo "Sync complete! You can now run 'pi'."
