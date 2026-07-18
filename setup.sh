@@ -8,8 +8,14 @@ if ! npm install -g @earendil-works/pi-coding-agent; then
     sudo npm install -g @earendil-works/pi-coding-agent
 fi
 
+# Resolve the real user's HOME directory even if run under sudo
+REAL_HOME="${HOME}"
+if [ -n "${SUDO_USER:-}" ]; then
+    REAL_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+fi
+
 # 2. Recreate extension directory
-EXT_DIR="$HOME/.pi/agent/extensions"
+EXT_DIR="$REAL_HOME/.pi/agent/extensions"
 mkdir -p "$EXT_DIR"
 
 # Get absolute path of this script directory
@@ -23,6 +29,10 @@ link_plugin() {
         echo "Linking $dest -> $src"
         rm -f "$dest"
         ln -s "$src" "$dest"
+        # Ensure the symlink is owned by the real user if run under sudo
+        if [ -n "${SUDO_USER:-}" ]; then
+            chown -h "$SUDO_USER:" "$dest"
+        fi
     else
         echo "Warning: Source path $src does not exist, skipping."
     fi
@@ -37,7 +47,7 @@ link_plugin "$REPO_DIR/plugins/pi-spawn/index.ts" "$EXT_DIR/pi-spawn.ts"
 link_plugin "$REPO_DIR/plugins/pi-telegram/telegram-notify.ts" "$EXT_DIR/telegram-notify.ts"
 
 # 4. Update the wrapper script to run global pi
-WRAPPER_PATH="$HOME/.pi/bin/pi"
+WRAPPER_PATH="$REAL_HOME/.pi/bin/pi"
 if [ -f "$WRAPPER_PATH" ]; then
     echo "Updating wrapper script at $WRAPPER_PATH..."
     cat > "$WRAPPER_PATH" <<'EOF'
@@ -45,6 +55,9 @@ if [ -f "$WRAPPER_PATH" ]; then
 exec pi "$@"
 EOF
     chmod +x "$WRAPPER_PATH"
+    if [ -n "${SUDO_USER:-}" ]; then
+        chown "$SUDO_USER:" "$WRAPPER_PATH"
+    fi
 fi
 
 echo "Setup complete! You can now run 'pi'."
